@@ -1,71 +1,77 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Игры — GitHub Pages</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <header>
-    <h1>🎮 Игровой портал</h1>
-    <nav>
-      <a href="#" class="active" data-section="games">Игры</a>
-      <a href="#" data-section="about">О сайте</a>
-    </nav>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Игры — GitHub Pages</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>🎮 Игровой портал</h1>
+      <nav>
+        <a href="#" class="active" data-section="games">Игры</a>
+        <a href="#" data-section="about">О сайте</a>
+      </nav>
+    </header>
 
-  <main>
-    <!-- Секция: Игры -->
-    <section id="section-games">
-      <div class="cards">
-        <!-- Змейка -->
-        <div class="card">
-          <img src="assets/snake.svg" alt="Змейка">
-          <h3>Космическая Змейка</h3>
-          <p>Ломает логику: еда уменьшает, скорость растёт.</p>
-          <button class="btn open-game" data-game="games/snake.html">Играть</button>
-        </div>
+    <main>
+      <!-- Секция: Игры -->
+      <section id="section-games">
+        <div class="cards">
+          <!-- Змейка -->
+          <div class="card">
+            <img src="assets/snake.svg" alt="Змейка" />
+            <h3>Космическая Змейка</h3>
+            <p>Ломает логику: еда уменьшает, скорость растёт.</p>
+            <button class="btn open-game" data-game="games/snake.html">Играть</button>
+          </div>
 
-        <!-- Крестики-нолики -->
-        <div class="card">
-          <img src="assets/tictactoe.svg" alt="Крестики и нолики">
-          <h3>ИИ‑СН: Крестики‑Нолики</h3>
-          <p>Доминирующий ИИ, который не проигрывает.</p>
-          <button class="btn open-game" data-game="games/tictactoe.html">Играть</button>
-        </div>
+          <!-- Крестики-нолики -->
+          <div class="card">
+            <img src="assets/tictactoe.svg" alt="Крестики и нолики" />
+            <h3>ИИ‑СН: Крестики‑Нолики</h3>
+            <p>Доминирующий ИИ, который не проигрывает.</p>
+            <button class="btn open-game" data-game="games/tictactoe.html">Играть</button>
+          </div>
 
-        <!-- Сингулярность (круговой арканоид) -->
-        <div class="card">
-          <img src="assets/singularity.svg" alt="Сингулярность">
-          <h3>Сингулярность</h3>
-          <p>Круговой арканоид с неоном, бонусами и гравитацией.</p>
-          <button class="btn open-game" data-game="games/singularity.html">Играть</button>
+          <!-- Сингулярность (круговой арканоид) -->
+          <div class="card">
+            <img src="assets/singularity.svg" alt="Сингулярность" />
+            <h3>Сингулярность</h3>
+            <p>Круговой арканоид с неоном, бонусами и гравитацией.</p>
+            <button class="btn open-game" data-game="games/singularity.html">Играть</button>
+          </div>
         </div>
+      </section>
+
+      <!-- Секция: О сайте -->
+      <section id="section-about" style="display: none">
+        <h2>О сайте</h2>
+        <p>
+          Этот сайт размещён на <strong>GitHub Pages</strong>. Здесь будут храниться и запускаться
+          мини‑игры.
+        </p>
+        <p>
+          <strong>Автор:</strong> bayansanaa<br />
+          <strong>VK:</strong>
+          <a href="https://vk.com/3ffawlk" target="_blank" rel="noopener">vk.com/3ffawlk</a>
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>© 2025 Игровой портал. Разработано с ❤️</p>
+    </footer>
+
+    <!-- Модальное окно -->
+    <div class="modal" id="modal">
+      <div class="modal-content">
+        <button class="modal-close" id="closeModal">✖</button>
+        <iframe id="gameFrame" src="" frameborder="0"></iframe>
       </div>
-    </section>
-
-    <!-- Секция: О сайте -->
-    <section id="section-about" style="display:none;">
-      <h2>О сайте</h2>
-      <p>Этот сайт размещён на <strong>GitHub Pages</strong>. Здесь будут храниться и запускаться мини‑игры.</p>
-      <p><strong>Автор:</strong> bayansanaa<br>
-      <strong>VK:</strong> <a href="https://vk.com/3ffawlk" target="_blank" rel="noopener">vk.com/3ffawlk</a></p>
-    </section>
-  </main>
-
-  <footer>
-    <p>© 2025 Игровой портал. Разработано с ❤️</p>
-  </footer>
-
-  <!-- Модальное окно -->
-  <div class="modal" id="modal">
-    <div class="modal-content">
-      <button class="modal-close" id="closeModal">✖</button>
-      <iframe id="gameFrame" src="" frameborder="0"></iframe>
     </div>
-  </div>
 
-  <script src="script.js"></script>
-</body>
+    <script src="script.js"></script>
+  </body>
 </html>

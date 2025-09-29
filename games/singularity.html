@@ -1,21 +1,73 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Сингулярность — круговой арканоид</title>
-  <style>
-    :root{--bg:#0a0e1a;--ring:#0f172a;--neon:#64ffda;--neo2:#c77dff;--text:#e6e6ff}
-    html,body{height:100%;margin:0;background:radial-gradient(60% 60% at 50% 40%,#0b1020,#020617);color:var(--text);font-family:Inter,system-ui,Arial}
-    .wrap{max-width:1100px;margin:0 auto;padding:12px;display:flex;gap:16px;align-items:flex-start}
-    canvas{background:transparent;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
-    .panel{width:320px;background:#0a0f1e;border:1px solid #0f172a;border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    h1{margin:0 0 8px 0;font-size:18px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
-    button{background:#2563eb;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
-    .label{font-size:12px;color:#94a3b8}
-    .stat{font-weight:700}
-  </style>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Сингулярность — круговой арканоид</title>
+    <style>
+      :root {
+        --bg: #0a0e1a;
+        --ring: #0f172a;
+        --neon: #64ffda;
+        --neo2: #c77dff;
+        --text: #e6e6ff;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: radial-gradient(60% 60% at 50% 40%, #0b1020, #020617);
+        color: var(--text);
+        font-family: Inter, system-ui, Arial;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 12px;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      canvas {
+        background: transparent;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+      .panel {
+        width: 320px;
+        background: #0a0f1e;
+        border: 1px solid #0f172a;
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .label {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .stat {
+        font-weight: 700;
+      }
+    </style>
   </head>
   <body>
     <div class="wrap">
@@ -26,187 +78,339 @@
           <button id="play">Играть/Пауза</button>
           <button id="restart">Заново</button>
         </div>
-        <div class="row" style="gap:12px">
-          <div><div class="label">Уровень</div><div class="stat" id="lv">1</div></div>
-          <div><div class="label">Очки</div><div class="stat" id="sc">0</div></div>
-          <div><div class="label">Шары</div><div class="stat" id="bs">0</div></div>
+        <div class="row" style="gap: 12px">
+          <div>
+            <div class="label">Уровень</div>
+            <div class="stat" id="lv">1</div>
+          </div>
+          <div>
+            <div class="label">Очки</div>
+            <div class="stat" id="sc">0</div>
+          </div>
+          <div>
+            <div class="label">Шары</div>
+            <div class="stat" id="bs">0</div>
+          </div>
         </div>
-        <p class="label">Правила: Платформа движется по окружности, отражает шар. Ломайте неоновые блоки. Бонусы притягиваются к стенке (гравитация от центра наружу). Проигрыш — когда шаров не осталось.</p>
+        <p class="label">
+          Правила: Платформа движется по окружности, отражает шар. Ломайте неоновые блоки. Бонусы
+          притягиваются к стенке (гравитация от центра наружу). Проигрыш — когда шаров не осталось.
+        </p>
       </aside>
     </div>
-  <script>
-  (function(){
-    const cv=document.getElementById('cv'); const cx=cv.getContext('2d');
-    const W=cv.width, H=cv.height; const C={x:W/2,y:H/2};
-    const R = Math.min(W,H)*0.42; // внутренняя игровая окружность
-    let state;
+    <script>
+      (function () {
+        const cv = document.getElementById('cv');
+        const cx = cv.getContext('2d');
+        const W = cv.width,
+          H = cv.height;
+        const C = { x: W / 2, y: H / 2 };
+        const R = Math.min(W, H) * 0.42; // внутренняя игровая окружность
+        let state;
 
-    const levels=[
-      {rings:1,sectors:10,ballSpeed:3,paddle:0.9,bonusRate:0.2},
-      {rings:2,sectors:12,ballSpeed:3.2,paddle:0.85,bonusRate:0.22},
-      {rings:2,sectors:14,ballSpeed:3.5,paddle:0.8,bonusRate:0.24},
-      {rings:3,sectors:14,ballSpeed:3.8,paddle:0.78,bonusRate:0.26},
-      {rings:3,sectors:16,ballSpeed:4.1,paddle:0.76,bonusRate:0.28},
-    ];
+        const levels = [
+          { rings: 1, sectors: 10, ballSpeed: 3, paddle: 0.9, bonusRate: 0.2 },
+          { rings: 2, sectors: 12, ballSpeed: 3.2, paddle: 0.85, bonusRate: 0.22 },
+          { rings: 2, sectors: 14, ballSpeed: 3.5, paddle: 0.8, bonusRate: 0.24 },
+          { rings: 3, sectors: 14, ballSpeed: 3.8, paddle: 0.78, bonusRate: 0.26 },
+          { rings: 3, sectors: 16, ballSpeed: 4.1, paddle: 0.76, bonusRate: 0.28 },
+        ];
 
-    function newState(i){
-      const L=levels[i];
-      const s={
-        level:i, running:true, score:0,
-        paddle:{ang:-Math.PI/2, size:Math.PI*0.18*L.paddle},
-        balls:[],
-        bricks:[],
-        bonuses:[],
-      };
-      // bricks: rings from R-40 inward
-      const ringW=18;
-      for(let r=0;r<L.rings;r++){
-        const rad = R - 40 - r*(ringW+8);
-        for(let k=0;k<L.sectors;k++){
-          const a0 = (k*2*Math.PI)/L.sectors;
-          const a1 = ((k+1)*2*Math.PI)/L.sectors;
-          s.bricks.push({rad, r1:rad-ringW, a0, a1, hp:1});
+        function newState(i) {
+          const L = levels[i];
+          const s = {
+            level: i,
+            running: true,
+            score: 0,
+            paddle: { ang: -Math.PI / 2, size: Math.PI * 0.18 * L.paddle },
+            balls: [],
+            bricks: [],
+            bonuses: [],
+          };
+          // bricks: rings from R-40 inward
+          const ringW = 18;
+          for (let r = 0; r < L.rings; r++) {
+            const rad = R - 40 - r * (ringW + 8);
+            for (let k = 0; k < L.sectors; k++) {
+              const a0 = (k * 2 * Math.PI) / L.sectors;
+              const a1 = ((k + 1) * 2 * Math.PI) / L.sectors;
+              s.bricks.push({ rad, r1: rad - ringW, a0, a1, hp: 1 });
+            }
+          }
+          // spawn one ball
+          s.balls.push({ x: C.x, y: C.y - R * 0.6, vx: 0, vy: L.ballSpeed });
+          return s;
         }
-      }
-      // spawn one ball
-      s.balls.push({x:C.x, y:C.y-R*0.6, vx:0, vy:L.ballSpeed});
-      return s;
-    }
 
-    function start(i=0){ state=newState(i); updateHUD(); draw() }
-    document.getElementById('restart').onclick=()=>start(state?state.level:0);
-    document.getElementById('play').onclick=()=>{ state.running=!state.running };
+        function start(i = 0) {
+          state = newState(i);
+          updateHUD();
+          draw();
+        }
+        document.getElementById('restart').onclick = () => start(state ? state.level : 0);
+        document.getElementById('play').onclick = () => {
+          state.running = !state.running;
+        };
 
-    // controls: A/D or arrows to rotate paddle
-    window.addEventListener('keydown',e=>{
-      const sp=0.12; if(!state) return;
-      if(e.key==='a'||e.key==='ArrowLeft') state.paddle.ang-=sp;
-      if(e.key==='d'||e.key==='ArrowRight') state.paddle.ang+=sp;
-    });
+        // controls: A/D or arrows to rotate paddle
+        window.addEventListener('keydown', (e) => {
+          const sp = 0.12;
+          if (!state) return;
+          if (e.key === 'a' || e.key === 'ArrowLeft') state.paddle.ang -= sp;
+          if (e.key === 'd' || e.key === 'ArrowRight') state.paddle.ang += sp;
+        });
 
-    function update(){ if(!state.running) return;
-      // balls physics
-      const nextBalls=[];
-      for(const b of state.balls){
-        // move
-        b.x+=b.vx; b.y+=b.vy;
-        const dx=b.x-C.x, dy=b.y-C.y; const dist=Math.hypot(dx,dy);
-        const ang=Math.atan2(dy,dx);
-        // collide with boundary circle
-        if(dist>=R-6){
-          // check paddle
-          const pa0=normalize(state.paddle.ang-state.paddle.size/2);
-          const pa1=normalize(state.paddle.ang+state.paddle.size/2);
-          let hit=false;
-          if(pa0<pa1) hit = (ang>=pa0 && ang<=pa1); else hit = (ang>=pa0 || ang<=pa1);
-          if(hit){
-            // reflect
-            const n={x:dx/dist, y:dy/dist};
-            const v={x:b.vx, y:b.vy};
-            const dot = v.x*n.x+v.y*n.y;
-            v.x -= 2*dot*n.x; v.y -= 2*dot*n.y;
-            // add spin based on where hit
-            const rel = shortestAngle(ang, state.paddle.ang)/ (state.paddle.size/2);
-            const tangent={x:-n.y,y:n.x};
-            v.x += tangent.x*2*rel; v.y += tangent.y*2*rel;
-            // clamp speed
-            const spd=Math.hypot(v.x,v.y); const tgt=levels[state.level].ballSpeed*1.05;
-            b.vx=v.x/spd*tgt; b.vy=v.y/spd*tgt;
-            // back off slightly
-            b.x=C.x+n.x*(R-8); b.y=C.y+n.y*(R-8);
-          } else {
-            // lost ball
-            continue;
+        function update() {
+          if (!state.running) return;
+          // balls physics
+          const nextBalls = [];
+          for (const b of state.balls) {
+            // move
+            b.x += b.vx;
+            b.y += b.vy;
+            const dx = b.x - C.x,
+              dy = b.y - C.y;
+            const dist = Math.hypot(dx, dy);
+            const ang = Math.atan2(dy, dx);
+            // collide with boundary circle
+            if (dist >= R - 6) {
+              // check paddle
+              const pa0 = normalize(state.paddle.ang - state.paddle.size / 2);
+              const pa1 = normalize(state.paddle.ang + state.paddle.size / 2);
+              let hit = false;
+              if (pa0 < pa1) hit = ang >= pa0 && ang <= pa1;
+              else hit = ang >= pa0 || ang <= pa1;
+              if (hit) {
+                // reflect
+                const n = { x: dx / dist, y: dy / dist };
+                const v = { x: b.vx, y: b.vy };
+                const dot = v.x * n.x + v.y * n.y;
+                v.x -= 2 * dot * n.x;
+                v.y -= 2 * dot * n.y;
+                // add spin based on where hit
+                const rel = shortestAngle(ang, state.paddle.ang) / (state.paddle.size / 2);
+                const tangent = { x: -n.y, y: n.x };
+                v.x += tangent.x * 2 * rel;
+                v.y += tangent.y * 2 * rel;
+                // clamp speed
+                const spd = Math.hypot(v.x, v.y);
+                const tgt = levels[state.level].ballSpeed * 1.05;
+                b.vx = (v.x / spd) * tgt;
+                b.vy = (v.y / spd) * tgt;
+                // back off slightly
+                b.x = C.x + n.x * (R - 8);
+                b.y = C.y + n.y * (R - 8);
+              } else {
+                // lost ball
+                continue;
+              }
+            }
+
+            // collide with bricks (polar sectors)
+            for (const br of state.bricks) {
+              if (br.hp <= 0) continue;
+              const r = Math.hypot(b.x - C.x, b.y - C.y);
+              const a = normalize(Math.atan2(b.y - C.y, b.x - C.x));
+              if (r <= br.rad && r >= br.r1 && angleIn(a, br.a0, br.a1)) {
+                br.hp = 0;
+                state.score += 10;
+                maybeBonus(b.x, b.y);
+                // reflect approximately by radial normal
+                const n = { x: (b.x - C.x) / r, y: (b.y - C.y) / r };
+                const v = { x: b.vx, y: b.vy };
+                const dot = v.x * n.x + v.y * n.y;
+                v.x -= 2 * dot * n.x;
+                v.y -= 2 * dot * n.y;
+                b.vx = v.x;
+                b.vy = v.y;
+              }
+            }
+
+            nextBalls.push(b);
+          }
+          state.balls = nextBalls;
+
+          // bonuses move outward due to radial gravity
+          const grav = 0.06;
+          for (const p of state.bonuses) {
+            const dx = p.x - C.x,
+              dy = p.y - C.y;
+            const r = Math.hypot(dx, dy);
+            const ux = dx / (r || 1),
+              uy = dy / (r || 1);
+            p.vx += ux * grav;
+            p.vy += uy * grav;
+            p.x += p.vx;
+            p.y += p.vy;
+            // collect by paddle at boundary
+            if (r >= R - 10) {
+              if (p.type === 'multi') splitBall();
+              else if (p.type === 'wide') widenPaddle();
+              p.collected = true;
+            }
+          }
+          state.bonuses = state.bonuses.filter(
+            (b) => !b.collected && Math.hypot(b.x - C.x, b.y - C.y) <= R + 20
+          );
+
+          // next level if no bricks
+          if (state.bricks.every((b) => b.hp <= 0)) {
+            if (state.level < levels.length - 1) {
+              state.level++;
+              const keepScore = state.score;
+              state = newState(state.level);
+              state.score = keepScore;
+            } else {
+              state.running = false;
+            }
+          }
+
+          if (state.balls.length === 0) {
+            state.running = false;
+          }
+          updateHUD();
+        }
+
+        function splitBall() {
+          if (state.balls.length === 0) return;
+          const b = state.balls[0];
+          const v1 = rot(b.vx, b.vy, 0.25),
+            v2 = rot(b.vx, b.vy, -0.25);
+          state.balls.push({ x: b.x, y: b.y, vx: v1.x, vy: v1.y });
+          state.balls.push({ x: b.x, y: b.y, vx: v2.x, vy: v2.y });
+        }
+        function widenPaddle() {
+          state.paddle.size = Math.min(state.paddle.size * 1.2, Math.PI * 0.35);
+        }
+        function maybeBonus(x, y) {
+          if (Math.random() < levels[state.level].bonusRate) {
+            const type = Math.random() < 0.5 ? 'multi' : 'wide';
+            state.bonuses.push({ x, y, vx: 0, vy: 0, type });
           }
         }
 
-        // collide with bricks (polar sectors)
-        for(const br of state.bricks){ if(br.hp<=0) continue;
-          const r=Math.hypot(b.x-C.x,b.y-C.y); const a=normalize(Math.atan2(b.y-C.y,b.x-C.x));
-          if(r<=br.rad && r>=br.r1 && angleIn(a, br.a0, br.a1)){
-            br.hp=0; state.score+=10; maybeBonus(b.x,b.y);
-            // reflect approximately by radial normal
-            const n={x:(b.x-C.x)/r, y:(b.y-C.y)/r};
-            const v={x:b.vx, y:b.vy}; const dot=v.x*n.x+v.y*n.y; v.x-=2*dot*n.x; v.y-=2*dot*n.y; b.vx=v.x; b.vy=v.y;
+        function angleIn(a, a0, a1) {
+          a = normalize(a);
+          a0 = normalize(a0);
+          a1 = normalize(a1);
+          if (a0 < a1) return a >= a0 && a <= a1;
+          return a >= a0 || a <= a1;
+        }
+        function normalize(a) {
+          a %= 2 * Math.PI;
+          if (a < 0) a += 2 * Math.PI;
+          return a;
+        }
+        function shortestAngle(a, b) {
+          let d = normalize(a) - normalize(b);
+          if (d > Math.PI) d -= 2 * Math.PI;
+          if (d < -Math.PI) d += 2 * Math.PI;
+          return d;
+        }
+        function rot(x, y, ang) {
+          const c = Math.cos(ang),
+            s = Math.sin(ang);
+          return { x: x * c - y * s, y: x * s + y * c };
+        }
+
+        function draw() {
+          cx.clearRect(0, 0, W, H);
+          // outer glow ring
+          cx.save();
+          const grad = cx.createRadialGradient(C.x, C.y, R - 40, C.x, C.y, R + 30);
+          grad.addColorStop(0, 'rgba(100,255,218,0.08)');
+          grad.addColorStop(1, 'rgba(199,125,255,0.12)');
+          cx.fillStyle = grad;
+          cx.beginPath();
+          cx.arc(C.x, C.y, R + 30, 0, Math.PI * 2);
+          cx.fill();
+          cx.restore();
+
+          // boundary circle
+          cx.lineWidth = 6;
+          cx.strokeStyle = '#1f2937';
+          cx.beginPath();
+          cx.arc(C.x, C.y, R, 0, Math.PI * 2);
+          cx.stroke();
+
+          // paddle arc
+          cx.save();
+          cx.strokeStyle =
+            '' + getComputedStyle(document.documentElement).getPropertyValue('--accent');
+          cx.shadowColor = '#64ffda';
+          cx.shadowBlur = 12;
+          cx.lineWidth = 10;
+          cx.lineCap = 'round';
+          cx.beginPath();
+          cx.arc(
+            C.x,
+            C.y,
+            R - 4,
+            state.paddle.ang - state.paddle.size / 2,
+            state.paddle.ang + state.paddle.size / 2
+          );
+          cx.stroke();
+          cx.restore();
+
+          // bricks
+          for (const br of state.bricks) {
+            if (br.hp <= 0) continue;
+            sector(br.r1, br.rad, br.a0, br.a1, '#0f172a', '#64ffda');
+          }
+
+          // bonuses
+          for (const p of state.bonuses) {
+            cx.save();
+            cx.fillStyle = p.type === 'multi' ? '#c77dff' : '#64ffda';
+            cx.shadowColor = cx.fillStyle;
+            cx.shadowBlur = 12;
+            cx.beginPath();
+            cx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
+          }
+
+          // balls
+          for (const b of state.balls) {
+            cx.save();
+            cx.fillStyle = '#e5e7eb';
+            cx.shadowColor = '#e5e7eb';
+            cx.shadowBlur = 10;
+            cx.beginPath();
+            cx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
           }
         }
 
-        nextBalls.push(b);
-      }
-      state.balls=nextBalls;
+        function sector(r0, r1, a0, a1, fill, stroke) {
+          cx.save();
+          cx.beginPath();
+          cx.arc(C.x, C.y, r1, a0, a1);
+          cx.arc(C.x, C.y, r0, a1, a0, true);
+          cx.closePath();
+          cx.fillStyle = fill;
+          cx.fill();
+          cx.lineWidth = 2;
+          cx.strokeStyle = stroke;
+          cx.stroke();
+          cx.restore();
+        }
 
-      // bonuses move outward due to radial gravity
-      const grav=0.06;
-      for(const p of state.bonuses){
-        const dx=p.x-C.x, dy=p.y-C.y; const r=Math.hypot(dx,dy);
-        const ux=dx/(r||1), uy=dy/(r||1);
-        p.vx += ux*grav; p.vy += uy*grav; p.x+=p.vx; p.y+=p.vy;
-        // collect by paddle at boundary
-        if(r>=R-10){ if(p.type==='multi') splitBall(); else if(p.type==='wide') widenPaddle(); p.collected=true; }
-      }
-      state.bonuses=state.bonuses.filter(b=>!b.collected && Math.hypot(b.x-C.x,b.y-C.y)<=R+20);
+        function tick() {
+          update();
+          draw();
+          requestAnimationFrame(tick);
+        }
+        function updateHUD() {
+          document.getElementById('lv').textContent = state.level + 1;
+          document.getElementById('sc').textContent = state.score;
+          document.getElementById('bs').textContent = state.balls.length;
+        }
 
-      // next level if no bricks
-      if(state.bricks.every(b=>b.hp<=0)){
-        if(state.level<levels.length-1) { state.level++; const keepScore=state.score; state=newState(state.level); state.score=keepScore; }
-        else { state.running=false; }
-      }
-
-      if(state.balls.length===0){ state.running=false; }
-      updateHUD();
-    }
-
-    function splitBall(){ if(state.balls.length===0) return; const b=state.balls[0];
-      const v1=rot(b.vx,b.vy, 0.25), v2=rot(b.vx,b.vy, -0.25);
-      state.balls.push({x:b.x,y:b.y,vx:v1.x,vy:v1.y});
-      state.balls.push({x:b.x,y:b.y,vx:v2.x,vy:v2.y});
-    }
-    function widenPaddle(){ state.paddle.size=Math.min(state.paddle.size*1.2, Math.PI*0.35) }
-    function maybeBonus(x,y){ if(Math.random()<levels[state.level].bonusRate){
-      const type=Math.random()<0.5?'multi':'wide'; state.bonuses.push({x,y,vx:0,vy:0,type}); }
-    }
-
-    function angleIn(a, a0, a1){ a=normalize(a); a0=normalize(a0); a1=normalize(a1); if(a0<a1) return a>=a0 && a<=a1; return a>=a0 || a<=a1 }
-    function normalize(a){ a%=2*Math.PI; if(a<0)a+=2*Math.PI; return a }
-    function shortestAngle(a,b){ let d=normalize(a)-normalize(b); if(d>Math.PI)d-=2*Math.PI; if(d<-Math.PI)d+=2*Math.PI; return d }
-    function rot(x,y,ang){ const c=Math.cos(ang), s=Math.sin(ang); return {x:x*c-y*s, y:x*s+y*c} }
-
-    function draw(){ cx.clearRect(0,0,W,H);
-      // outer glow ring
-      cx.save();
-      const grad=cx.createRadialGradient(C.x,C.y,R-40,C.x,C.y,R+30);
-      grad.addColorStop(0,'rgba(100,255,218,0.08)'); grad.addColorStop(1,'rgba(199,125,255,0.12)');
-      cx.fillStyle=grad; cx.beginPath(); cx.arc(C.x,C.y,R+30,0,Math.PI*2); cx.fill(); cx.restore();
-
-      // boundary circle
-      cx.lineWidth=6; cx.strokeStyle='#1f2937'; cx.beginPath(); cx.arc(C.x,C.y,R,0,Math.PI*2); cx.stroke();
-
-      // paddle arc
-      cx.save(); cx.strokeStyle=''+getComputedStyle(document.documentElement).getPropertyValue('--accent');
-      cx.shadowColor='#64ffda'; cx.shadowBlur=12; cx.lineWidth=10; cx.lineCap='round';
-      cx.beginPath(); cx.arc(C.x,C.y,R-4, state.paddle.ang-state.paddle.size/2, state.paddle.ang+state.paddle.size/2);
-      cx.stroke(); cx.restore();
-
-      // bricks
-      for(const br of state.bricks){ if(br.hp<=0) continue; sector(br.r1, br.rad, br.a0, br.a1, '#0f172a', '#64ffda'); }
-
-      // bonuses
-      for(const p of state.bonuses){
-        cx.save(); cx.fillStyle=p.type==='multi'? '#c77dff':'#64ffda'; cx.shadowColor=cx.fillStyle; cx.shadowBlur=12;
-        cx.beginPath(); cx.arc(p.x,p.y,6,0,Math.PI*2); cx.fill(); cx.restore();
-      }
-
-      // balls
-      for(const b of state.balls){ cx.save(); cx.fillStyle='#e5e7eb'; cx.shadowColor='#e5e7eb'; cx.shadowBlur=10; cx.beginPath(); cx.arc(b.x,b.y,5,0,Math.PI*2); cx.fill(); cx.restore(); }
-    }
-
-    function sector(r0,r1,a0,a1,fill,stroke){ cx.save(); cx.beginPath(); cx.arc(C.x,C.y,r1,a0,a1); cx.arc(C.x,C.y,r0,a1,a0,true); cx.closePath(); cx.fillStyle=fill; cx.fill(); cx.lineWidth=2; cx.strokeStyle=stroke; cx.stroke(); cx.restore(); }
-
-    function tick(){ update(); draw(); requestAnimationFrame(tick) }
-    function updateHUD(){ document.getElementById('lv').textContent=state.level+1; document.getElementById('sc').textContent=state.score; document.getElementById('bs').textContent=state.balls.length }
-
-    start(0); requestAnimationFrame(tick);
-  })();
-  </script>
+        start(0);
+        requestAnimationFrame(tick);
+      })();
+    </script>
   </body>
-  </html>
+</html>
