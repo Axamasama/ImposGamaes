@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Космическая змейка</title>
+  <style>
+    :root{
+      --bg: #0b1020; --grid:#0f172a; --snake:#22d3ee; --head:#38bdf8; --apple:#ef4444; --wall:#64748b; --portal:#a78bfa; --meteor:#f59e0b;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#0b1020,#020617);color:#e5e7eb;font-family:Inter,system-ui,Arial}
+    .wrap{max-width:1100px;margin:0 auto;padding:10px;display:flex;gap:16px;align-items:flex-start}
+    canvas{background:var(--grid);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+    .panel{width:320px;background:#0a0f1e;border:1px solid #0f172a;border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    h1{margin:0 0 6px 0;font-size:18px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    button{background:#2563eb;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
+    .label{font-size:12px;color:#94a3b8}
+    .stat{font-weight:700}
+    .lvl{display:flex;gap:6px}
+    .lvl button{background:#111827;border:1px solid #1f2937}
+    .lvl button.active{background:#1d4ed8}
+    .note{color:#9ca3af;font-size:12px;line-height:1.4}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="c" width="720" height="720"></canvas>
+    <aside class="panel">
+      <h1>Космическая змейка</h1>
+      <div class="row">
+        <button id="play">Играть/Пауза (Space)</button>
+        <button id="restart">Заново (R)</button>
+      </div>
+      <div class="row lvl" id="levels"></div>
+      <div class="row">
+        <div><div class="label">Уровень</div><div class="stat" id="statLevel">1</div></div>
+        <div><div class="label">Скорость</div><div class="stat" id="statSpeed">1x</div></div>
+        <div><div class="label">Длина</div><div class="stat" id="statLen">0</div></div>
+      </div>
+      <p class="note">
+        Правила: Начальная длина 8. Яблоко не удлиняет — наоборот, отпадает хвост и превращается в препятствие, а скорость удваивается. Когда длина станет 2 — появляется портал, войдите в него, чтобы пройти уровень. Каждый следующий уровень — злее.
+      </p>
+      <p class="note">Управление: Стрелки / WASD. Портал фиолетовый. Метеоры движутся. Удачи 🙂</p>
+    </aside>
+  </div>
+  <script>
+  (function(){
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const N = 24; // cells per side
+    const CELL = Math.floor(canvas.width / N);
+    const SPEED_BASE = 6; // frames per step lower is faster (we'll compute interval)
+
+    const DIRS = {ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],
+                  w:[0,-1],s:[0,1],a:[-1,0],d:[1,0]};
+
+    const levels = [
+      // Level 1: tutorial impossible
+      {name:'I', baseSpeed:1, walls:[], meteors:0, darkness:false, wrap:false, apples:1},
+      // Level 2: debris everywhere
+      {name:'II', baseSpeed:1.2, walls:'random20', meteors:1, darkness:false, wrap:false, apples:1},
+      // Level 3: moving comets
+      {name:'III', baseSpeed:1.3, walls:'cross', meteors:3, darkness:false, wrap:false, apples:1},
+      // Level 4: narrow corridors
+      {name:'IV', baseSpeed:1.4, walls:'labyrinth', meteors:4, darkness:false, wrap:false, apples:1},
+      // Level 5: darkness
+      {name:'V', baseSpeed:1.5, walls:'labyrinth-hard', meteors:5, darkness:true, wrap:false, apples:1},
+    ];
+
+    // UI level buttons
+    const lvlWrap = document.getElementById('levels');
+    levels.forEach((lv,i)=>{
+      const b=document.createElement('button');b.textContent=lv.name;b.onclick=()=>start(i);lvlWrap.appendChild(b)
+    })
+
+    let state;
+    function newState(levelIndex){
+      const conf = levels[levelIndex];
+      const snake = [];
+      const startX = Math.floor(N/2), startY=Math.floor(N/2);
+      for(let i=0;i<8;i++) snake.push({x:startX-i,y:startY});
+      return {levelIndex, conf,
+        snake, dir:{x:1,y:0}, pendingDir:{x:1,y:0},
+        obstacles:new Set(), apples:[], meteors:[], portal:null,
+        speedMul:1, running:false, frames:0, over:false, victory:false
+      };
+    }
+
+    function key(e){
+      const d=DIRS[e.key]; if(!d) return;
+      const nd={x:d[0],y:d[1]};
+      // prevent reversing into self
+      if(state && (nd.x!==-state.dir.x || nd.y!==-state.dir.y)) state.pendingDir=nd;
+    }
+    window.addEventListener('keydown',e=>{
+      if(e.key===' '){toggle(); e.preventDefault();}
+      else if(e.key==='r' || e.key==='R'){start(state?state.levelIndex:0)}
+      else key(e)
+    });
+    document.getElementById('play').onclick=toggle;
+    document.getElementById('restart').onclick=()=>start(state?state.levelIndex:0);
+
+    function posKey(p){return p.x+','+p.y}
+    function inBounds(p){return p.x>=0&&p.y>=0&&p.x<N&&p.y<N}
+
+    function addWalls(kind){
+      const add=(x,y)=>state.obstacles.add(x+','+y);
+      if(kind==='random20'){
+        for(let k=0;k<20;k++) add(Math.floor(Math.random()*N),Math.floor(Math.random()*N));
+      } else if(kind==='cross'){
+        for(let i=0;i<N;i++){add(i,Math.floor(N/2));add(Math.floor(N/2),i)}
+      } else if(kind==='labyrinth' || kind==='labyrinth-hard'){
+        for(let y=2;y<N-2;y+=2){for(let x=2;x<N-2;x+=2){add(x,y)}}
+        if(kind==='labyrinth-hard'){
+          for(let i=0;i<N;i++){add(i,0);add(i,N-1);add(0,i);add(N-1,i)}
+        }
+      }
+    }
+
+    function placeApple(){
+      let p; do {p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}}
+      while(occupied(p));
+      state.apples.push(p);
+    }
+
+    function placePortal(){
+      let p; do {p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}} while(occupied(p));
+      state.portal=p;
+    }
+
+    function spawnMeteors(k){
+      for(let i=0;i<k;i++){
+        let p; do{p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}} while(occupied(p));
+        const dirs=[[1,0],[-1,0],[0,1],[0,-1]]; const d=dirs[Math.floor(Math.random()*dirs.length)];
+        state.meteors.push({x:p.x,y:p.y,dx:d[0],dy:d[1]});
+      }
+    }
+
+    function occupied(p){
+      if(state.obstacles.has(posKey(p))) return true;
+      if(state.portal && p.x===state.portal.x && p.y===state.portal.y) return true;
+      for(const s of state.snake) if(s.x===p.x&&s.y===p.y) return true;
+      for(const a of state.apples) if(a.x===p.x&&a.y===p.y) return true;
+      for(const m of state.meteors) if(m.x===p.x&&m.y===p.y) return true;
+      return false;
+    }
+
+    function start(levelIndex=0){
+      state=newState(levelIndex);
+      // walls
+      if(state.conf.walls && typeof state.conf.walls==='string') addWalls(state.conf.walls);
+      // apples
+      for(let i=0;i<state.conf.apples;i++) placeApple();
+      // meteors
+      spawnMeteors(state.conf.meteors||0);
+      updateStats();
+      draw();
+    }
+
+    function toggle(){ if(!state) start(0); state.running=!state.running }
+
+    // Game loop
+    let last=0; const STEP=1000/12; // base rendering fps
+    function loop(ts){
+      requestAnimationFrame(loop);
+      if(!state) return;
+      const speed = state.conf.baseSpeed * state.speedMul; // higher -> faster
+      const interval = Math.max(30, 220 - speed*120); // ms per step
+      if(!last) last=ts; const delta=ts-last;
+      if(delta>=interval){ last=ts; if(state.running&&!state.over&&!state.victory) tick(); draw(); }
+    }
+    requestAnimationFrame(loop);
+
+    function tick(){
+      // move meteors
+      for(const m of state.meteors){
+        m.x+=m.dx; m.y+=m.dy;
+        if(m.x<0||m.y<0||m.x>=N||m.y>=N){ m.x=(m.x+N)%N; m.y=(m.y+N)%N; }
+        // bounce on walls
+        if(state.obstacles.has(posKey(m))){ m.x-=m.dx; m.y-=m.dy; m.dx*=-1; m.dy*=-1; }
+      }
+
+      // move snake
+      state.dir=state.pendingDir;
+      const head={x:state.snake[0].x+state.dir.x,y:state.snake[0].y+state.dir.y};
+      if(!state.conf.wrap && !inBounds(head)) { state.over=true; return; }
+      head.x=(head.x+N)%N; head.y=(head.y+N)%N;
+
+      // collisions
+      if(state.obstacles.has(posKey(head))) { state.over=true; return; }
+      for(const m of state.meteors){ if(m.x===head.x&&m.y===head.y){ state.over=true; return; }}
+      for(let i=0;i<state.snake.length;i++){ const s=state.snake[i]; if(s.x===head.x&&s.y===head.y){ state.over=true; return; }}
+
+      // apples
+      let ate=false; let tailToDrop=null;
+      for(let i=0;i<state.apples.length;i++){
+        const a=state.apples[i];
+        if(a.x===head.x&&a.y===head.y){ ate=true; tailToDrop=state.snake[state.snake.length-1]; state.apples.splice(i,1); break; }
+      }
+
+      // advance body
+      state.snake.unshift(head);
+      if(ate){
+        // drop tail as obstacle and speed up
+        if(state.snake.length>1){
+          state.snake.pop(); // remove last (we'll pop one more below to shrink)
+          const lastSeg=state.snake.pop();
+          if(lastSeg) state.obstacles.add(posKey(tailToDrop||lastSeg));
+        }
+        state.speedMul*=2; // insane!
+        placeApple();
+      } else {
+        state.snake.pop();
+      }
+
+      // portal
+      if(!state.portal && state.snake.length<=2) placePortal();
+      if(state.portal && head.x===state.portal.x && head.y===state.portal.y){
+        // next level or victory
+        if(state.levelIndex<levels.length-1){ start(state.levelIndex+1); }
+        else { state.victory=true; state.running=false; }
+      }
+
+      updateStats();
+    }
+
+    function draw(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      // background grid
+      ctx.fillStyle = '#0b1228';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // darkness mask
+      if(state.conf.darkness){
+        ctx.save();
+        ctx.fillStyle = '#000000';
+        ctx.globalAlpha = 0.75;
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.globalCompositeOperation = 'destination-out';
+        const head=state.snake[0];
+        ctx.beginPath();
+        ctx.arc((head.x+0.5)*CELL,(head.y+0.5)*CELL, CELL*3, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // obstacles
+      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--wall');
+      state.obstacles.forEach(k=>{
+        const [x,y]=k.split(',').map(Number); rect(x,y,0.9,0.9)
+      })
+
+      // portal
+      if(state.portal){ ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--portal'); rect(state.portal.x,state.portal.y,0.9,0.9) }
+
+      // meteors
+      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--meteor');
+      for(const m of state.meteors) rect(m.x,m.y,0.9,0.9)
+
+      // apples
+      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--apple');
+      for(const a of state.apples) rect(a.x,a.y,0.8,0.8)
+
+      // snake
+      for(let i=state.snake.length-1;i>=0;i--){
+        const s=state.snake[i];
+        ctx.fillStyle = i===0 ? getComputedStyle(document.documentElement).getPropertyValue('--head')
+                              : getComputedStyle(document.documentElement).getPropertyValue('--snake');
+        rect(s.x,s.y,0.9,0.9)
+      }
+
+      // overlays
+      if(state.over||state.victory){
+        ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle='#e5e7eb'; ctx.textAlign='center';
+        ctx.font='bold 42px Inter, system-ui';
+        ctx.fillText(state.victory?'ВСЕ УРОВНИ ПРОЙДЕНЫ!':'ПРОВАЛ!', canvas.width/2, canvas.height/2);
+        ctx.font='16px Inter, system-ui';
+        ctx.fillText('Нажмите R чтобы начать заново', canvas.width/2, canvas.height/2+30);
+      }
+    }
+
+    function rect(x,y,w=1,h=1){
+      const pad = (1-w)/2; ctx.fillRect((x+pad)*CELL,(y+pad)*CELL,w*CELL,h*CELL);
+    }
+
+    function updateStats(){
+      document.getElementById('statLevel').textContent = (state.levelIndex+1);
+      document.getElementById('statSpeed').textContent = (state.conf.baseSpeed*state.speedMul).toFixed(1)+'x';
+      document.getElementById('statLen').textContent = state.snake.length;
+      Array.from(lvlWrap.children).forEach((b,i)=>b.classList.toggle('active',i===state.levelIndex));
+    }
+
+    // init
+    start(0);
+  })();
+  </script>
+  </body>
+  </html>
