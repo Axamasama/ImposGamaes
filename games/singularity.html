@@ -132,6 +132,9 @@
             particles: [],
             slowTimer: 0,
             shield: 0,
+            stickyTimer: 0,
+            aimTimer: 0,
+            hasteTimer: 0,
           };
           // bricks: rings from R-40 inward
           const ringW = 18;
@@ -183,8 +186,26 @@
           if (!state.running) return;
           // balls physics
           const nextBalls = [];
-          const speedScale = state.slowTimer > 0 ? 0.7 : 1.0;
+          const speedScale =
+            (state.slowTimer > 0 ? 0.7 : 1.0) * (state.hasteTimer > 0 ? 1.35 : 1.0);
           for (const b of state.balls) {
+            if (b.stuck) {
+              // follow paddle
+              const n = { x: Math.cos(state.paddle.ang), y: Math.sin(state.paddle.ang) };
+              b.x = C.x + n.x * (R - 8);
+              b.y = C.y + n.y * (R - 8);
+              b.stuckTime = (b.stuckTime || 0) + 1;
+              if (b.stuckTime > 40) {
+                // auto release outward
+                b.stuck = false;
+                b.stuckTime = 0;
+                const spd = levels[state.level].ballSpeed * 1.05;
+                b.vx = n.x * spd;
+                b.vy = n.y * spd;
+              }
+              nextBalls.push(b);
+              continue;
+            }
             // move
             b.x += b.vx * speedScale;
             b.y += b.vy * speedScale;
@@ -215,8 +236,30 @@
                 // clamp speed
                 const spd = Math.hypot(v.x, v.y);
                 const tgt = levels[state.level].ballSpeed * 1.05;
-                b.vx = (v.x / spd) * tgt;
-                b.vy = (v.y / spd) * tgt;
+                let nvx = (v.x / spd) * tgt;
+                let nvy = (v.y / spd) * tgt;
+                // sticky
+                if (state.stickyTimer > 0) {
+                  b.stuck = true;
+                  b.stuckTime = 0;
+                  emitHitParticles(ang);
+                  beep(520, 0.03);
+                  nextBalls.push(b);
+                  continue;
+                }
+                // auto aim toward nearest brick
+                if (state.aimTimer > 0) {
+                  const target = nearestBrickPoint();
+                  if (target) {
+                    const vx = target.x - b.x;
+                    const vy = target.y - b.y;
+                    const len = Math.hypot(vx, vy) || 1;
+                    nvx = (vx / len) * tgt;
+                    nvy = (vy / len) * tgt;
+                  }
+                }
+                b.vx = nvx;
+                b.vy = nvy;
                 // back off slightly
                 b.x = C.x + n.x * (R - 8);
                 b.y = C.y + n.y * (R - 8);
@@ -289,7 +332,12 @@
               else if (p.type === 'slow')
                 state.slowTimer = 600; // ~10s
               else if (p.type === 'shield') state.shield = Math.min(state.shield + 1, 3);
+              else if (p.type === 'sticky') state.stickyTimer = 600;
+              else if (p.type === 'aim') state.aimTimer = 600;
+              else if (p.type === 'haste') state.hasteTimer = 600;
+              else if (p.type === 'breaker') destroyRing();
               p.collected = true;
+              beep(720, 0.02);
             }
           }
           state.bonuses = state.bonuses.filter(
@@ -309,6 +357,9 @@
           state.particles = nextP;
 
           if (state.slowTimer > 0) state.slowTimer--;
+          if (state.stickyTimer > 0) state.stickyTimer--;
+          if (state.aimTimer > 0) state.aimTimer--;
+          if (state.hasteTimer > 0) state.hasteTimer--;
 
           // next level if no bricks
           if (state.bricks.every((b) => b.hp <= 0)) {
@@ -342,10 +393,57 @@
         function maybeBonus(x, y) {
           if (Math.random() < levels[state.level].bonusRate) {
             const roll = Math.random();
-            const type =
-              roll < 0.35 ? 'multi' : roll < 0.7 ? 'wide' : roll < 0.85 ? 'slow' : 'shield';
+            let type = 'multi';
+            if (roll < 0.2) type = 'multi';
+            else if (roll < 0.4) type = 'wide';
+            else if (roll < 0.55) type = 'slow';
+            else if (roll < 0.7) type = 'shield';
+            else if (roll < 0.82) type = 'sticky';
+            else if (roll < 0.92) type = 'aim';
+            else if (roll < 0.98) type = 'haste';
+            else type = 'breaker';
             state.bonuses.push({ x, y, vx: 0, vy: 0, type });
           }
+        }
+
+        function nearestBrickPoint() {
+          let best = null;
+          let bestD = 1e9;
+          for (const br of state.bricks) {
+            if (br.hp <= 0) continue;
+            // brick center in polar
+            const a = (br.a0 + br.a1) / 2;
+            const r = (br.rad + br.r1) / 2;
+            const x = C.x + Math.cos(a) * r;
+            const y = C.y + Math.sin(a) * r;
+            for (const b of state.balls) {
+              const d = Math.hypot(x - b.x, y - b.y);
+              if (d < bestD) {
+                bestD = d;
+                best = { x, y };
+              }
+            }
+          }
+          return best;
+        }
+
+        function destroyRing() {
+          // find outermost ring with hp>0 (largest rad)
+          let targetRad = -1;
+          for (const br of state.bricks) if (br.hp > 0) targetRad = Math.max(targetRad, br.rad);
+          if (targetRad < 0) return;
+          for (const br of state.bricks) {
+            if (br.hp > 0 && Math.abs(br.rad - targetRad) < 1e-6) {
+              br.hp = 0;
+              state.score += 10;
+              // emit particles along arc
+              const a = (br.a0 + br.a1) / 2;
+              const x = C.x + Math.cos(a) * br.rad;
+              const y = C.y + Math.sin(a) * br.rad;
+              emitBrickParticles(x, y);
+            }
+          }
+          beep(300, 0.08);
         }
 
         function emitBrickParticles(x, y) {
@@ -475,7 +573,15 @@
                   ? '#64ffda'
                   : p.type === 'slow'
                     ? '#22d3ee'
-                    : '#f59e0b';
+                    : p.type === 'shield'
+                      ? '#f59e0b'
+                      : p.type === 'sticky'
+                        ? '#38bdf8'
+                        : p.type === 'aim'
+                          ? '#84cc16'
+                          : p.type === 'haste'
+                            ? '#ef4444'
+                            : '#eab308';
             cx.shadowColor = cx.fillStyle;
             cx.shadowBlur = 12;
             cx.beginPath();

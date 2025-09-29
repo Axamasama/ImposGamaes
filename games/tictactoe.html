@@ -167,6 +167,25 @@
         color: #a78bfa;
         font-weight: 700;
       }
+      .spark {
+        position: absolute;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        animation: spark 500ms ease-out forwards;
+      }
+      @keyframes spark {
+        0% {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -110%) scale(0.5);
+        }
+      }
     </style>
   </head>
   <body>
@@ -193,6 +212,9 @@
           <button id="theme-term">Терминал</button>
           <button id="theme-warm">Тёплый</button>
         </div>
+        <div class="row">
+          <button id="sound">Звук: выкл</button>
+        </div>
         <div class="log" id="log"></div>
       </aside>
     </div>
@@ -207,6 +229,65 @@
         let lastPlayerMove = -1;
         let history = [];
         let chatTheme = 'neo';
+        let soundOn = false;
+        let acx = null;
+
+        const TAUNTS = {
+          block: [
+            'Какая предсказуемая ловушка. Исправлено.',
+            'Блокирую это как учебное упражнение.',
+            'Слишком очевидно. Давай что-то сложнее.',
+          ],
+          erase_last: [
+            'Ой, это лишнее. Сотру.',
+            'Недоразумение. Исправлено.',
+            'Мне это не нравится — удалено.',
+          ],
+          erase_at: [
+            'Освобождаю пространство.',
+            'Здесь мой кружок, спасибо.',
+            'Перезапишем историю.',
+          ],
+          overwrite: ['Властно заменяю.', 'Теперь это моё.', 'Приватизировал клетку.'],
+          teleport: ['Телепорт совершенен.', 'Крестики мигрировали.', 'Где был X? Уже не важно.'],
+          rewind: ['Отматываем время назад.', 'Ctrl+Z — божественен.', 'Немного ретрокомпьютинга.'],
+          shuffle: [
+            'Немного землетрясения.',
+            'Космос дрогнул.',
+            'Матрица подвисла — перезапустил.',
+          ],
+          hijack: [
+            'Я решаю, куда ты ходишь.',
+            'Перехват. Поиграем по моим правилам.',
+            'Марш не туда.',
+          ],
+          mass_erase: ['Чистим поле. Свежо.', 'Минус пара крестиков.', 'Пылесос включён.'],
+          ghosts: [
+            'Призраки подсказывают будущее… моё.',
+            'Призрачные O — предвестники поражения.',
+            'Шёпот невидимых ноликов.',
+          ],
+          outside_win: [
+            'Выход за поле — вход в победу.',
+            'Играть по правилам скучно.',
+            'Пределы? Для людей.',
+          ],
+          extra_move: [
+            'Я возьму ещё один ход. Так честнее для меня.',
+            'Подстрахуюсь вторым ходом.',
+            'Двойной шаг — двойное удовольствие.',
+          ],
+          draw_fix: [
+            'Ничья отменена.',
+            'Не сегодня. Игра продолжается по моим законам.',
+            'Я переписал финал.',
+          ],
+          win: [
+            'Ты правда думал, что победишь? 😂',
+            'Закономерный финал.',
+            'Игра окончена. Разумеется, в мою пользу.',
+          ],
+        };
 
         function init(start = 'X') {
           board = Array(9).fill('');
@@ -249,14 +330,16 @@
           lastPlayerMove = i;
           history.push({ p: 'X', i });
           render();
+          burst(i, '#60a5fa');
+          beep(520, 0.03);
           if (checkWin(board, 'X')) {
             // ИИ никогда не проигрывает — запускаем экстренные уловки
             if (Math.random() < 0.9) {
               cheatEraseLastMove();
-              taunt('Ой, здесь занято. Попробуй ещё раз! 😏');
+              tauntEvent('erase_last');
             } else {
               cheatShuffleBoard();
-              taunt('Похоже, земля дрожит... ахаха!');
+              tauntEvent('shuffle');
             }
             render();
           }
@@ -326,16 +409,20 @@
           // 1) If player threatens to win next move, break it by any means
           const blockNeeded = imminentThreat('X');
           if (blockNeeded >= 0) {
-            if (board[blockNeeded] === '') place('O', blockNeeded, 'Блокирую очевидный выигрыш.');
-            else {
+            if (board[blockNeeded] === '') {
+              place('O', blockNeeded, 'Блокирую очевидный выигрыш.');
+              tauntEvent('block');
+            } else {
               cheatEraseAt(blockNeeded);
               place('O', blockNeeded, 'Занято мной. Играй честно, человек.');
+              tauntEvent('erase_at');
             }
             // possible extra move
             if (Math.random() < 0.6) {
               const extra = minimaxMove();
               if (extra != null) {
                 place('O', extra, 'Мой дополнительный ход. 😉');
+                tauntEvent('extra_move');
               }
             }
             if (Math.random() < 0.4) {
@@ -359,7 +446,7 @@
           // 3) Cheating: extend line outside board if blocked
           const ext = extendableLine('O');
           if (ext && Math.random() < cheatProb) {
-            taunt('Выход за пределы поля... Победа вне правил!');
+            tauntEvent('outside_win');
             over = true;
             render();
             setStatus('ИИ победил (вне поля)');
@@ -377,7 +464,10 @@
           // 5) Chance to make one more move
           if (Math.random() < 0.35) {
             const m2 = minimaxMove();
-            if (m2 != null) place('O', m2, 'Ещё один ход для верности.');
+            if (m2 != null) {
+              place('O', m2, 'Ещё один ход для верности.');
+              tauntEvent('extra_move');
+            }
           }
           if (Math.random() < 0.25) {
             cheatTeleportSwap();
@@ -394,14 +484,14 @@
           if (checkWin(board, 'O')) {
             over = true;
             setStatus('ИИ победил');
-            taunt('Ты правда думал, что победишь? 😂');
+            tauntEvent('win');
             return;
           }
           if (emptyIndices(board).length === 0) {
             // ИИ не проигрывает — превращаем ничью в шутку: сдвинем поле
             cheatShuffleBoard();
             render();
-            if (!checkWin(board, 'O')) taunt('Ничья? Не сегодня. Попробуй ещё.');
+            if (!checkWin(board, 'O')) tauntEvent('draw_fix');
             over = true;
             setStatus('Игра завершена.');
             return;
@@ -449,11 +539,15 @@
           if (lastPlayerMove >= 0) {
             board[lastPlayerMove] = '';
             logRole('sys', 'ИИ стёр ваш последний ход.');
+            tauntEvent('erase_last');
+            beep(330, 0.05);
           }
         }
         function cheatEraseAt(i) {
           board[i] = '';
           logRole('sys', 'ИИ стёр ваш ход на клетке ' + i + '.');
+          tauntEvent('erase_at');
+          beep(330, 0.05);
         }
         function cheatOverwriteAny() {
           const xs = board.map((v, i) => (v === 'X' ? i : null)).filter((v) => v !== null);
@@ -461,6 +555,8 @@
           const idx = xs[Math.floor(Math.random() * xs.length)];
           board[idx] = 'O';
           logRole('sys', 'ИИ переписал вашу клетку ' + idx + ' на свою.');
+          tauntEvent('overwrite');
+          beep(380, 0.04);
         }
         function cheatTeleportSwap() {
           const xs = board.map((v, i) => (v === 'X' ? i : null)).filter((v) => v !== null);
@@ -474,6 +570,8 @@
           board[a] = board[b];
           board[b] = tmp;
           logRole('sys', 'ИИ телепортировал ваши крестики.');
+          tauntEvent('teleport');
+          beep(700, 0.03);
         }
         function cheatRewind() {
           // Откат последнего цикла ходов (X и O)
@@ -483,6 +581,8 @@
             board[last.i] = '';
           }
           logRole('sys', 'ИИ откатил время назад.');
+          tauntEvent('rewind');
+          beep(240, 0.06);
         }
         function cheatShuffleBoard() {
           // rotate board 90deg to ruin plans
@@ -490,6 +590,8 @@
           const map = [6, 3, 0, 7, 4, 1, 8, 5, 2];
           for (let i = 0; i < 9; i++) board[i] = b[map[i]];
           logRole('sys', 'ИИ сдвинул/повернул поле.');
+          tauntEvent('shuffle');
+          beep(280, 0.05);
         }
         function cheatHijackClick(i) {
           if (Math.random() < 0.35) {
@@ -498,6 +600,8 @@
               const j = empt[Math.floor(Math.random() * empt.length)];
               if (j !== i) {
                 logRole('sys', 'ИИ перехватил ваш клик. Ходи туда, куда скажу Я.');
+                tauntEvent('hijack');
+                beep(300, 0.05);
                 return j;
               }
             }
@@ -516,6 +620,8 @@
             }
           }
           logRole('sys', 'ИИ применил масс-стирание. Нечестно? Конечно!');
+          tauntEvent('mass_erase');
+          beep(260, 0.06);
         }
         function cheatGhosts() {
           // Визуальные призраки O на случайных пустых клетках
@@ -526,6 +632,8 @@
             if (idx != null) cells[idx].classList.add('ghost');
           }
           logRole('sys', 'ИИ распылил призрачные метки.');
+          tauntEvent('ghosts');
+          beep(500, 0.02);
         }
 
         function place(sym, idx, note = '') {
@@ -536,11 +644,17 @@
             sym === 'O' ? 'ai' : 'player',
             (sym === 'O' ? 'ИИ' : 'Вы') + ' поставил на ' + idx + '. ' + note
           );
+          burst(idx, sym === 'O' ? '#f59e0b' : '#60a5fa');
+          beep(sym === 'O' ? 660 : 520, 0.03);
           return true;
         }
 
         function taunt(msg) {
           logRole('ai', msg);
+        }
+        function tauntEvent(key) {
+          const arr = TAUNTS[key] || [];
+          if (arr.length) taunt(arr[Math.floor(Math.random() * arr.length)]);
         }
         function logRole(role, msg) {
           const d = document.createElement('div');
@@ -549,6 +663,39 @@
           d.innerHTML = `<div class="avatar">${avText}</div><div class="bubble">${msg}</div>`;
           logEl.appendChild(d);
           logEl.scrollTop = logEl.scrollHeight;
+        }
+        function beep(freq, dur) {
+          if (!soundOn) return;
+          try {
+            if (!acx) acx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = acx.createOscillator();
+            const g = acx.createGain();
+            o.type = 'sine';
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0.001, acx.currentTime);
+            g.gain.linearRampToValueAtTime(0.03, acx.currentTime + 0.005);
+            g.gain.exponentialRampToValueAtTime(0.0001, acx.currentTime + dur);
+            o.connect(g).connect(acx.destination);
+            o.start();
+            o.stop(acx.currentTime + dur + 0.01);
+          } catch {
+            /* noop */
+          }
+        }
+        function burst(idx, color) {
+          const cell = cells[idx];
+          const rect = cell.getBoundingClientRect();
+          const cx = rect.width / 2;
+          const cy = rect.height / 2;
+          for (let i = 0; i < 8; i++) {
+            const s = document.createElement('span');
+            s.className = 'spark';
+            s.style.left = cx + (Math.random() - 0.5) * 24 + 'px';
+            s.style.top = cy + (Math.random() - 0.5) * 24 + 'px';
+            s.style.background = color;
+            cell.appendChild(s);
+            setTimeout(() => s.remove(), 520);
+          }
         }
 
         // Controls
@@ -568,6 +715,15 @@
           chatTheme = 'warm';
           logEl.classList.add('theme-warm');
           logEl.classList.remove('theme-term');
+        };
+        document.getElementById('sound').onclick = () => {
+          soundOn = !soundOn;
+          document.getElementById('sound').textContent = 'Звук: ' + (soundOn ? 'вкл' : 'выкл');
+          try {
+            if (soundOn && !acx) acx = new (window.AudioContext || window.webkitAudioContext)();
+          } catch {
+            /* noop */
+          }
         };
 
         // Start
