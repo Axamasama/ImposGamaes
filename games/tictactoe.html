@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Крестики и нолики — ИИ-СН</title>
+  <style>
+    :root{--bg:#0b1020;--card:#0a0f1e;--grid:#111827;--line:#1f2937;--x:#60a5fa;--o:#f59e0b;--accent:#a78bfa}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#0b1020,#020617);color:#e5e7eb;font-family:Inter,system-ui,Arial}
+    .wrap{max-width:900px;margin:0 auto;padding:16px;display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
+    .board{background:var(--card);border:1px solid #0f172a;border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .cell{height:140px;background:var(--grid);border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:52px;cursor:pointer;user-select:none}
+    .cell.disabled{cursor:not-allowed;opacity:0.6}
+    .panel{background:var(--card);border:1px solid #0f172a;border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    button{background:#2563eb;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
+    .log{height:220px;overflow:auto;background:#0b1020;border:1px solid #0f172a;border-radius:10px;padding:8px;font-size:12px}
+    .badge{display:inline-block;background:#111827;border:1px solid #1f2937;border-radius:8px;padding:6px 8px;margin:4px 0}
+    .taunt{color:#a78bfa;font-weight:700}
+  </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="board">
+        <h2 style="margin-top:0">ИИ-СН: неубиваемый противник</h2>
+        <div class="badge">Цель: ИИ никогда не проигрывает. Он может нарушать правила.</div>
+        <div id="status">Ваш ход (X)</div>
+        <div class="grid" id="grid"></div>
+      </section>
+      <aside class="panel">
+        <h3 style="margin-top:0">Управление</h3>
+        <div class="row">
+          <button id="restart">Заново</button>
+          <button id="first">Играть первым</button>
+          <button id="second">Играть вторым</button>
+        </div>
+        <div class="row">
+          <div class="badge">Режим обмана: <span id="cheatPct">70%</span></div>
+        </div>
+        <div class="log" id="log"></div>
+      </aside>
+    </div>
+    <script>
+    (function(){
+      const gridEl = document.getElementById('grid');
+      const statusEl = document.getElementById('status');
+      const logEl = document.getElementById('log');
+      const cheatPctEl = document.getElementById('cheatPct');
+      const cells=[];
+      let board, turn, over, cheatProb;
+      let lastPlayerMove = -1;
+
+      function init(start='X'){
+        board = Array(9).fill('');
+        turn = start; over=false; cheatProb=0.7; lastPlayerMove=-1;
+        gridEl.innerHTML=''; cells.length=0;
+        for(let i=0;i<9;i++){
+          const d=document.createElement('div'); d.className='cell'; d.dataset.idx=i;
+          d.onclick=()=>onCell(i);
+          gridEl.appendChild(d); cells.push(d);
+        }
+        setStatus(); logEl.innerHTML='';
+        taunt("Ну что, человек? Готов проигрывать снова и снова?");
+        if(turn==='O') aiTurn(true);
+      }
+
+      function setStatus(extra=''){
+        statusEl.textContent = (over? 'Игра окончена.' : (turn==='X'? 'Ваш ход (X)' : 'Ход ИИ (O)')) + (extra? ' '+extra:'');
+      }
+
+      function onCell(i){ if(over) return; if(turn!=='X') return; if(board[i]) return;
+        board[i]='X'; lastPlayerMove=i; render();
+        if(checkWin(board,'X')){
+          // ИИ никогда не проигрывает — запускаем экстренные уловки
+          if(Math.random()<0.9){ cheatEraseLastMove(); taunt("Ой, здесь занято. Попробуй ещё раз! 😏"); }
+          else { cheatShuffleBoard(); taunt("Похоже, земля дрожит... ахаха!"); }
+          render();
+        }
+        turn='O'; setStatus();
+        aiTurn();
+      }
+
+      function render(){
+        for(let i=0;i<9;i++){
+          cells[i].textContent=board[i];
+          cells[i].classList.toggle('disabled', !!board[i] || over || turn==='O');
+        }
+      }
+
+      function lines(){
+        return [ [0,1,2],[3,4,5],[6,7,8], [0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6] ];
+      }
+
+      function checkWin(b, s){
+        return lines().some(([a,b1,c])=> b[a]===s && b[b1]===s && b[c]===s );
+      }
+
+      function emptyIndices(b){ return b.map((v,i)=>v?null:i).filter(v=>v!==null) }
+
+      function minimaxMove(){
+        // Simple unbeatable normal logic when not cheating
+        const me='O', you='X';
+        // 1) win if possible
+        for(const [a,b1,c] of lines()){
+          const arr=[a,b1,c]; const vals=arr.map(i=>board[i]);
+          if(vals.filter(v=>v===me).length===2 && vals.includes('')) return arr[vals.indexOf('')];
+        }
+        // 2) block immediate loss
+        for(const [a,b1,c] of lines()){
+          const arr=[a,b1,c]; const vals=arr.map(i=>board[i]);
+          if(vals.filter(v=>v===you).length===2 && vals.includes('')) return arr[vals.indexOf('')];
+        }
+        // 3) take center
+        if(!board[4]) return 4;
+        // 4) take a corner
+        const corners=[0,2,6,8].filter(i=>!board[i]); if(corners.length) return corners[Math.floor(Math.random()*corners.length)];
+        // 5) otherwise random
+        const empt=emptyIndices(board); return empt[Math.floor(Math.random()*empt.length)]
+      }
+
+      function aiTurn(isFirst=false){ if(over) return;
+        // 1) If player threatens to win next move, break it by any means
+        const blockNeeded = imminentThreat('X');
+        if(blockNeeded>=0){
+          if(board[blockNeeded]==='')
+            place('O', blockNeeded, 'Блокирую очевидный выигрыш.');
+          else {
+            cheatEraseAt(blockNeeded);
+            place('O', blockNeeded, 'Занято мной. Играй честно, человек.');
+          }
+          // possible extra move
+          if(Math.random()<0.3){
+            const extra = minimaxMove(); if(extra!=null) { place('O', extra, 'Мой дополнительный ход. 😉'); }
+          }
+          finalize(); return;
+        }
+
+        // 2) If I can win normally, do it
+        const w = winningMove('O');
+        if(w>=0){ place('O', w, 'Выигрышной ход.'); finalize(); return; }
+
+        // 3) Cheating: extend line outside board if blocked
+        const ext = extendableLine('O');
+        if(ext && Math.random()<cheatProb){
+          taunt('Выход за пределы поля... Победа вне правил!');
+          over=true; render();
+          setStatus('ИИ победил (вне поля)');
+          log('ИИ использовал выход за поле и победил.');
+          return;
+        }
+
+        // 4) Normal strategic move
+        const m = minimaxMove(); place('O', m, 'Логичный ход.');
+
+        // 5) Chance to make one more move
+        if(Math.random()<0.2){ const m2=minimaxMove(); if(m2!=null) place('O', m2, 'Ещё один ход для верности.'); }
+
+        finalize();
+      }
+
+      function finalize(){
+        render();
+        if(checkWin(board,'O')){ over=true; setStatus('ИИ победил'); taunt('Ты правда думал, что победишь? 😂'); return; }
+        if(emptyIndices(board).length===0){
+          // ИИ не проигрывает — превращаем ничью в шутку: сдвинем поле
+          cheatShuffleBoard(); render();
+          if(!checkWin(board,'O')) taunt('Ничья? Не сегодня. Попробуй ещё.');
+          over=true; setStatus('Игра завершена.'); return;
+        }
+        turn='X'; setStatus(); render();
+      }
+
+      function imminentThreat(sym){
+        for(const [a,b1,c] of lines()){
+          const arr=[a,b1,c]; const vals=arr.map(i=>board[i]);
+          if(vals.filter(v=>v===sym).length===2 && vals.includes('')) return arr[vals.indexOf('')];
+        }
+        return -1;
+      }
+
+      function winningMove(sym){
+        for(const [a,b1,c] of lines()){
+          const arr=[a,b1,c]; const vals=arr.map(i=>board[i]);
+          if(vals.filter(v=>v===sym).length===2 && vals.includes('')) return arr[vals.indexOf('')];
+        }
+        return -1;
+      }
+
+      function extendableLine(sym){
+        // if have two in line but third is opponent, we "extend" outside
+        for(const [a,b1,c] of lines()){
+          const arr=[a,b1,c]; const vals=arr.map(i=>board[i]);
+          if(vals.filter(v=>v===sym).length===2 && vals.filter(v=>v==='X').length===1) return arr;
+        }
+        return null;
+      }
+
+      function cheatEraseLastMove(){ if(lastPlayerMove>=0){ board[lastPlayerMove]=''; log('ИИ стёр ваш последний ход.'); } }
+      function cheatEraseAt(i){ board[i]=''; log('ИИ стёр ваш ход на клетке '+i+'.'); }
+      function cheatShuffleBoard(){
+        // rotate board 90deg to ruin plans
+        const b=board.slice();
+        const map=[6,3,0,7,4,1,8,5,2];
+        for(let i=0;i<9;i++) board[i]=b[map[i]];
+        log('ИИ сдвинул/повернул поле.');
+      }
+
+      function place(sym, idx, note=''){
+        if(board[idx]) return false; board[idx]=sym; log((sym==='O'?'ИИ':'Вы')+' поставил на '+idx+'. '+note); return true;
+      }
+
+      function taunt(msg){ log('<span class="taunt">ИИ:</span> '+msg); }
+      function log(msg){ const d=document.createElement('div'); d.innerHTML=msg; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+
+      // Controls
+      document.getElementById('restart').onclick=()=>init('X');
+      document.getElementById('first').onclick=()=>init('X');
+      document.getElementById('second').onclick=()=>init('O');
+
+      // Start
+      init('X');
+    })();
+    </script>
+  </body>
+  </html>
