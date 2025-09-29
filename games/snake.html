@@ -39,7 +39,7 @@
         <div><div class="label">Длина</div><div class="stat" id="statLen">0</div></div>
       </div>
       <p class="note">
-        Правила: Начальная длина 8. Яблоко не удлиняет — наоборот, отпадает хвост и превращается в препятствие, а скорость удваивается. Когда длина станет 2 — появляется портал, войдите в него, чтобы пройти уровень. Каждый следующий уровень — злее.
+        Правила: Начальная длина 8. Яблоко не удлиняет — наоборот, отпадает хвост и превращается в препятствие, а скорость увеличивается в 1.4 раза. Когда длина станет 2 — появляется портал, войдите в него, чтобы пройти уровень. Каждый следующий уровень — злее.
       </p>
       <p class="note">Управление: Стрелки / WASD. Портал фиолетовый. Метеоры движутся. Удачи 🙂</p>
     </aside>
@@ -77,11 +77,8 @@
     let state;
     function newState(levelIndex){
       const conf = levels[levelIndex];
-      const snake = [];
-      const startX = Math.floor(N/2), startY=Math.floor(N/2);
-      for(let i=0;i<8;i++) snake.push({x:startX-i,y:startY});
       return {levelIndex, conf,
-        snake, dir:{x:1,y:0}, pendingDir:{x:1,y:0},
+        snake:[], dir:{x:1,y:0}, pendingDir:{x:1,y:0},
         obstacles:new Set(), apples:[], meteors:[], portal:null,
         speedMul:1, running:false, frames:0, over:false, victory:false
       };
@@ -107,20 +104,32 @@
     function addWalls(kind){
       const add=(x,y)=>state.obstacles.add(x+','+y);
       if(kind==='random20'){
-        for(let k=0;k<20;k++) add(Math.floor(Math.random()*N),Math.floor(Math.random()*N));
+        for(let k=0;k<20;k++){
+          const x=Math.floor(Math.random()*N), y=Math.floor(Math.random()*N);
+          if(Math.abs(x-N/2)<3 && Math.abs(y-N/2)<3) continue; // не блокируем центр
+          add(x,y);
+        }
       } else if(kind==='cross'){
-        for(let i=0;i<N;i++){add(i,Math.floor(N/2));add(Math.floor(N/2),i)}
+        const mid=Math.floor(N/2);
+        for(let i=0;i<N;i++){
+          if(i%6===0) continue; // делаем проходы
+          add(i,mid); add(mid,i)
+        }
       } else if(kind==='labyrinth' || kind==='labyrinth-hard'){
-        for(let y=2;y<N-2;y+=2){for(let x=2;x<N-2;x+=2){add(x,y)}}
+        for(let y=2;y<N-2;y+=2){for(let x=2;x<N-2;x+=2){ if((x+y)%6!==0) add(x,y) }}
         if(kind==='labyrinth-hard'){
-          for(let i=0;i<N;i++){add(i,0);add(i,N-1);add(0,i);add(N-1,i)}
+          for(let i=0;i<N;i++){
+            if(i%5!==0){ add(i,0);add(i,N-1);add(0,i);add(N-1,i) }
+          }
         }
       }
     }
 
     function placeApple(){
-      let p; do {p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}}
-      while(occupied(p));
+      let p; let tries=0;
+      do {
+        p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}; tries++;
+      } while((occupied(p) || !isReachable(headPos(), p)) && tries<500);
       state.apples.push(p);
     }
 
@@ -150,12 +159,51 @@
       state=newState(levelIndex);
       // walls
       if(state.conf.walls && typeof state.conf.walls==='string') addWalls(state.conf.walls);
+      // safe spawn after walls
+      setSafeSpawn();
       // apples
       for(let i=0;i<state.conf.apples;i++) placeApple();
       // meteors
       spawnMeteors(state.conf.meteors||0);
       updateStats();
       draw();
+    }
+
+    function headPos(){ return state.snake[0] || {x:Math.floor(N/2),y:Math.floor(N/2)} }
+
+    function setSafeSpawn(){
+      const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+      for(let y=1;y<N-1;y++) for(let x=1;x<N-1;x++){
+        for(const d of dirs){
+          if(isCorridor({x,y}, d, 10)){
+            const snake=[]; for(let i=0;i<8;i++) snake.push({x:x-i*d.x,y:y-i*d.y});
+            if(snake.every(p=>inBounds(p)&&!state.obstacles.has(posKey(p)))){
+              state.snake=snake; state.dir=d; state.pendingDir=d; return;
+            }
+          }
+        }
+      }
+      // fallback center
+      const cx=Math.floor(N/2), cy=Math.floor(N/2);
+      const snake=[]; for(let i=0;i<8;i++) snake.push({x:cx-i,y:cy});
+      state.snake=snake; state.dir={x:1,y:0}; state.pendingDir={x:1,y:0};
+    }
+
+    function isCorridor(p, d, len){
+      for(let i=0;i<len;i++){
+        const q={x:p.x+i*d.x,y:p.y+i*d.y};
+        if(!inBounds(q) || state.obstacles.has(posKey(q))) return false;
+      }
+      return true;
+    }
+
+    function isReachable(from, to){
+      const k=(p)=>p.x+','+p.y; const seen=new Set([k(from)]); const q=[from];
+      while(q.length){ const c=q.shift(); if(c.x===to.x&&c.y===to.y) return true;
+        const ns=[{x:c.x+1,y:c.y},{x:c.x-1,y:c.y},{x:c.x,y:c.y+1},{x:c.x,y:c.y-1}];
+        for(const n of ns){ if(inBounds(n)&&!state.obstacles.has(posKey(n))&&!seen.has(k(n))){ seen.add(k(n)); q.push(n);} }
+      }
+      return false;
     }
 
     function toggle(){ if(!state) start(0); state.running=!state.running }
