@@ -21,4 +21,11 @@ module.exports = [
       'no-undef': 'off',
     },
   },
+  {
+    files: ['**/*.html'],
+    rules: {
+      // Prettier is enforced via separate prettier --check; disable here to avoid html-plugin spacing quirks
+      'prettier/prettier': 'off',
+    },
+  },
 ];

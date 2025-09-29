@@ -97,13 +97,63 @@
         cursor: pointer;
       }
       .log {
-        height: 220px;
+        height: 260px;
         overflow: auto;
         background: #0b1020;
         border: 1px solid #0f172a;
         border-radius: 10px;
         padding: 8px;
         font-size: 12px;
+      }
+      .log.theme-term {
+        background: #030712;
+        color: #e5e7eb;
+      }
+      .log.theme-warm {
+        background: #0f0a0a;
+      }
+      .msg {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 8px;
+        align-items: start;
+        margin: 6px 0;
+      }
+      .msg .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 900;
+        color: #0b1020;
+      }
+      .msg.ai .avatar {
+        background: linear-gradient(135deg, #a78bfa, #64ffda);
+      }
+      .msg.player .avatar {
+        background: linear-gradient(135deg, #60a5fa, #22d3ee);
+      }
+      .msg.sys .avatar {
+        background: #94a3b8;
+        color: #0b1020;
+        font-weight: 700;
+      }
+      .msg .bubble {
+        background: #0a0f1e;
+        border: 1px solid #0f172a;
+        border-radius: 10px;
+        padding: 8px 10px;
+      }
+      .log.theme-term .msg .bubble {
+        background: #0b1220;
+        border-color: #18233a;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      .log.theme-warm .msg .bubble {
+        background: #120c0c;
+        border-color: #311a1a;
       }
       .badge {
         display: inline-block;
@@ -137,6 +187,12 @@
         <div class="row">
           <div class="badge">Режим обмана: <span id="cheatPct">70%</span></div>
         </div>
+        <div class="row">
+          <div class="badge">Тема чата:</div>
+          <button id="theme-neo">Неон</button>
+          <button id="theme-term">Терминал</button>
+          <button id="theme-warm">Тёплый</button>
+        </div>
         <div class="log" id="log"></div>
       </aside>
     </div>
@@ -150,6 +206,7 @@
         let board, turn, over, cheatProb;
         let lastPlayerMove = -1;
         let history = [];
+        let chatTheme = 'neo';
 
         function init(start = 'X') {
           board = Array(9).fill('');
@@ -306,7 +363,7 @@
             over = true;
             render();
             setStatus('ИИ победил (вне поля)');
-            log('ИИ использовал выход за поле и победил.');
+            logRole('sys', 'ИИ использовал выход за поле и победил.');
             return;
           }
 
@@ -391,19 +448,19 @@
         function cheatEraseLastMove() {
           if (lastPlayerMove >= 0) {
             board[lastPlayerMove] = '';
-            log('ИИ стёр ваш последний ход.');
+            logRole('sys', 'ИИ стёр ваш последний ход.');
           }
         }
         function cheatEraseAt(i) {
           board[i] = '';
-          log('ИИ стёр ваш ход на клетке ' + i + '.');
+          logRole('sys', 'ИИ стёр ваш ход на клетке ' + i + '.');
         }
         function cheatOverwriteAny() {
           const xs = board.map((v, i) => (v === 'X' ? i : null)).filter((v) => v !== null);
           if (!xs.length) return;
           const idx = xs[Math.floor(Math.random() * xs.length)];
           board[idx] = 'O';
-          log('ИИ переписал вашу клетку ' + idx + ' на свою.');
+          logRole('sys', 'ИИ переписал вашу клетку ' + idx + ' на свою.');
         }
         function cheatTeleportSwap() {
           const xs = board.map((v, i) => (v === 'X' ? i : null)).filter((v) => v !== null);
@@ -416,7 +473,7 @@
           const tmp = board[a];
           board[a] = board[b];
           board[b] = tmp;
-          log('ИИ телепортировал ваши крестики.');
+          logRole('sys', 'ИИ телепортировал ваши крестики.');
         }
         function cheatRewind() {
           // Откат последнего цикла ходов (X и O)
@@ -425,14 +482,14 @@
             if (!last) break;
             board[last.i] = '';
           }
-          log('ИИ откатил время назад.');
+          logRole('sys', 'ИИ откатил время назад.');
         }
         function cheatShuffleBoard() {
           // rotate board 90deg to ruin plans
           const b = board.slice();
           const map = [6, 3, 0, 7, 4, 1, 8, 5, 2];
           for (let i = 0; i < 9; i++) board[i] = b[map[i]];
-          log('ИИ сдвинул/повернул поле.');
+          logRole('sys', 'ИИ сдвинул/повернул поле.');
         }
         function cheatHijackClick(i) {
           if (Math.random() < 0.35) {
@@ -440,7 +497,7 @@
             if (empt.length) {
               const j = empt[Math.floor(Math.random() * empt.length)];
               if (j !== i) {
-                log('ИИ перехватил ваш клик. Ходи туда, куда скажу Я.');
+                logRole('sys', 'ИИ перехватил ваш клик. Ходи туда, куда скажу Я.');
                 return j;
               }
             }
@@ -458,7 +515,7 @@
               board[idx] = '';
             }
           }
-          log('ИИ применил масс-стирание. Нечестно? Конечно!');
+          logRole('sys', 'ИИ применил масс-стирание. Нечестно? Конечно!');
         }
         function cheatGhosts() {
           // Визуальные призраки O на случайных пустых клетках
@@ -468,23 +525,28 @@
             const idx = empt[Math.floor(Math.random() * empt.length)];
             if (idx != null) cells[idx].classList.add('ghost');
           }
-          log('ИИ распылил призрачные метки.');
+          logRole('sys', 'ИИ распылил призрачные метки.');
         }
 
         function place(sym, idx, note = '') {
           if (board[idx]) return false;
           board[idx] = sym;
           history.push({ p: sym, i: idx });
-          log((sym === 'O' ? 'ИИ' : 'Вы') + ' поставил на ' + idx + '. ' + note);
+          logRole(
+            sym === 'O' ? 'ai' : 'player',
+            (sym === 'O' ? 'ИИ' : 'Вы') + ' поставил на ' + idx + '. ' + note
+          );
           return true;
         }
 
         function taunt(msg) {
-          log('<span class="taunt">ИИ:</span> ' + msg);
+          logRole('ai', msg);
         }
-        function log(msg) {
+        function logRole(role, msg) {
           const d = document.createElement('div');
-          d.innerHTML = msg;
+          d.className = `msg ${role}`;
+          const avText = role === 'ai' ? 'ИИ' : role === 'player' ? 'X' : '!';
+          d.innerHTML = `<div class="avatar">${avText}</div><div class="bubble">${msg}</div>`;
           logEl.appendChild(d);
           logEl.scrollTop = logEl.scrollHeight;
         }
@@ -493,6 +555,20 @@
         document.getElementById('restart').onclick = () => init('X');
         document.getElementById('first').onclick = () => init('X');
         document.getElementById('second').onclick = () => init('O');
+        document.getElementById('theme-neo').onclick = () => {
+          chatTheme = 'neo';
+          logEl.classList.remove('theme-term', 'theme-warm');
+        };
+        document.getElementById('theme-term').onclick = () => {
+          chatTheme = 'term';
+          logEl.classList.add('theme-term');
+          logEl.classList.remove('theme-warm');
+        };
+        document.getElementById('theme-warm').onclick = () => {
+          chatTheme = 'warm';
+          logEl.classList.add('theme-warm');
+          logEl.classList.remove('theme-term');
+        };
 
         // Start
         init('X');
