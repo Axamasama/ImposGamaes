@@ -27,11 +27,16 @@
         display: flex;
         gap: 16px;
         align-items: flex-start;
+        flex-wrap: wrap;
       }
       canvas {
         background: transparent;
         border-radius: 16px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        width: 100%;
+        height: auto;
+        max-width: 720px;
+        touch-action: none;
       }
       .panel {
         width: 320px;
@@ -40,6 +45,11 @@
         border-radius: 12px;
         padding: 14px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      @media (max-width: 768px) {
+        .panel {
+          width: 100%;
+        }
       }
       h1 {
         margin: 0 0 8px 0;
@@ -173,6 +183,44 @@
           }
           document.getElementById('sound').textContent = 'Звук: ' + (soundOn ? 'вкл' : 'выкл');
         };
+
+        // touch/pointer control: drag around the circle to set paddle angle
+        let dragging = false;
+        cv.addEventListener(
+          'pointerdown',
+          (e) => {
+            dragging = true;
+            cv.setPointerCapture(e.pointerId);
+            updateAngle(e);
+            e.preventDefault();
+          },
+          { passive: false }
+        );
+        cv.addEventListener(
+          'pointermove',
+          (e) => {
+            if (!dragging) return;
+            updateAngle(e);
+            e.preventDefault();
+          },
+          { passive: false }
+        );
+        cv.addEventListener(
+          'pointerup',
+          (e) => {
+            dragging = false;
+            cv.releasePointerCapture(e.pointerId);
+            e.preventDefault();
+          },
+          { passive: false }
+        );
+        function updateAngle(e) {
+          const r = cv.getBoundingClientRect();
+          const x = e.clientX - r.left;
+          const y = e.clientY - r.top;
+          const a = Math.atan2(y - r.height / 2, x - r.width / 2);
+          state.paddle.ang = a;
+        }
 
         // controls: A/D or arrows to rotate paddle
         window.addEventListener('keydown', (e) => {

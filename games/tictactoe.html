@@ -58,6 +58,26 @@
         user-select: none;
         overflow: hidden;
       }
+      @media (max-width: 768px) {
+        .wrap {
+          grid-template-columns: 1fr;
+        }
+        .board,
+        .panel {
+          width: 100%;
+        }
+        .grid {
+          gap: 8px;
+        }
+        .cell {
+          height: auto;
+          aspect-ratio: 1 / 1;
+          font-size: 12vw;
+        }
+        .log {
+          height: 200px;
+        }
+      }
       .cell.ghost::after {
         content: 'O';
         position: absolute;

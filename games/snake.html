@@ -35,6 +35,10 @@
         background: var(--grid);
         border-radius: 12px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        width: 100%;
+        height: auto;
+        max-width: 720px;
+        touch-action: none;
       }
       .panel {
         width: 320px;
@@ -43,6 +47,35 @@
         border-radius: 12px;
         padding: 14px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      @media (max-width: 768px) {
+        .wrap {
+          flex-direction: column;
+        }
+        .panel {
+          width: 100%;
+        }
+      }
+      .mobile-ctrl {
+        position: fixed;
+        left: 50%;
+        bottom: 14px;
+        transform: translateX(-50%);
+        display: none;
+        gap: 8px;
+        z-index: 10;
+      }
+      .mobile-ctrl button {
+        background: #111827;
+        border: 1px solid #1f2937;
+        padding: 12px 14px;
+        border-radius: 10px;
+        font-weight: 800;
+      }
+      @media (max-width: 768px) {
+        .mobile-ctrl {
+          display: flex;
+        }
       }
       h1 {
         margin: 0 0 6px 0;
@@ -124,6 +157,12 @@
           Управление: Стрелки / WASD. Портал фиолетовый. Метеоры движутся. Удачи 🙂
         </p>
       </aside>
+    </div>
+    <div class="mobile-ctrl">
+      <button id="btnLeft">◀︎</button>
+      <button id="btnUp">▲</button>
+      <button id="btnDown">▼</button>
+      <button id="btnRight">▶︎</button>
     </div>
     <script>
       (function () {
@@ -247,6 +286,42 @@
         });
         document.getElementById('play').onclick = toggle;
         document.getElementById('restart').onclick = () => start(state ? state.levelIndex : 0);
+        // touch swipe on canvas
+        let ts = null;
+        canvas.addEventListener(
+          'touchstart',
+          (e) => {
+            if (!e.touches.length) return;
+            ts = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          },
+          { passive: true }
+        );
+        canvas.addEventListener(
+          'touchmove',
+          (e) => {
+            if (!ts || !e.touches.length) return;
+            const dx = e.touches[0].clientX - ts.x;
+            const dy = e.touches[0].clientY - ts.y;
+            const adx = Math.abs(dx),
+              ady = Math.abs(dy);
+            if (adx + ady > 24) {
+              const dir = adx > ady ? (dx > 0 ? [1, 0] : [-1, 0]) : dy > 0 ? [0, 1] : [0, -1];
+              const nd = { x: dir[0], y: dir[1] };
+              if (state && (nd.x !== -state.dir.x || nd.y !== -state.dir.y)) state.pendingDir = nd;
+              ts = null;
+            }
+          },
+          { passive: true }
+        );
+        // on-screen buttons
+        const bindBtn = (id, nd) =>
+          (document.getElementById(id).onclick = () => {
+            if (state && (nd.x !== -state.dir.x || nd.y !== -state.dir.y)) state.pendingDir = nd;
+          });
+        bindBtn('btnLeft', { x: -1, y: 0 });
+        bindBtn('btnRight', { x: 1, y: 0 });
+        bindBtn('btnUp', { x: 0, y: -1 });
+        bindBtn('btnDown', { x: 0, y: 1 });
 
         function posKey(p) {
           return p.x + ',' + p.y;
