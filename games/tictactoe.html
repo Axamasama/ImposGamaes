@@ -50,10 +50,11 @@
       const cells=[];
       let board, turn, over, cheatProb;
       let lastPlayerMove = -1;
+      let history = [];
 
       function init(start='X'){
         board = Array(9).fill('');
-        turn = start; over=false; cheatProb=0.7; lastPlayerMove=-1;
+        turn = start; over=false; cheatProb=0.8; lastPlayerMove=-1; history=[];
         gridEl.innerHTML=''; cells.length=0;
         for(let i=0;i<9;i++){
           const d=document.createElement('div'); d.className='cell'; d.dataset.idx=i;
@@ -70,7 +71,7 @@
       }
 
       function onCell(i){ if(over) return; if(turn!=='X') return; if(board[i]) return;
-        board[i]='X'; lastPlayerMove=i; render();
+        board[i]='X'; lastPlayerMove=i; history.push({p:'X',i}); render();
         if(checkWin(board,'X')){
           // ИИ никогда не проигрывает — запускаем экстренные уловки
           if(Math.random()<0.9){ cheatEraseLastMove(); taunt("Ой, здесь занято. Попробуй ещё раз! 😏"); }
@@ -130,9 +131,10 @@
             place('O', blockNeeded, 'Занято мной. Играй честно, человек.');
           }
           // possible extra move
-          if(Math.random()<0.3){
+          if(Math.random()<0.6){
             const extra = minimaxMove(); if(extra!=null) { place('O', extra, 'Мой дополнительный ход. 😉'); }
           }
+          if(Math.random()<0.4){ cheatOverwriteAny(); }
           finalize(); return;
         }
 
@@ -150,11 +152,13 @@
           return;
         }
 
-        // 4) Normal strategic move
+        // 4) Normal strategic move (или подменить поле, если игрок силён)
+        if(Math.random()<0.15){ cheatShuffleBoard(); }
         const m = minimaxMove(); place('O', m, 'Логичный ход.');
 
         // 5) Chance to make one more move
-        if(Math.random()<0.2){ const m2=minimaxMove(); if(m2!=null) place('O', m2, 'Ещё один ход для верности.'); }
+        if(Math.random()<0.35){ const m2=minimaxMove(); if(m2!=null) place('O', m2, 'Ещё один ход для верности.'); }
+        if(Math.random()<0.25){ cheatTeleportSwap(); }
 
         finalize();
       }
@@ -198,6 +202,24 @@
 
       function cheatEraseLastMove(){ if(lastPlayerMove>=0){ board[lastPlayerMove]=''; log('ИИ стёр ваш последний ход.'); } }
       function cheatEraseAt(i){ board[i]=''; log('ИИ стёр ваш ход на клетке '+i+'.'); }
+      function cheatOverwriteAny(){
+        const xs = board.map((v,i)=>v==='X'?i:null).filter(v=>v!==null);
+        if(!xs.length) return; const idx = xs[Math.floor(Math.random()*xs.length)];
+        board[idx]='O'; log('ИИ переписал вашу клетку '+idx+' на свою.');
+      }
+      function cheatTeleportSwap(){
+        const xs = board.map((v,i)=>v==='X'?i:null).filter(v=>v!==null);
+        if(xs.length<2) return;
+        const a = xs[Math.floor(Math.random()*xs.length)]; let b=a; while(b===a){ b=xs[Math.floor(Math.random()*xs.length)] }
+        const tmp = board[a]; board[a]=board[b]; board[b]=tmp; log('ИИ телепортировал ваши крестики.');
+      }
+      function cheatRewind(){
+        // Откат последнего цикла ходов (X и O)
+        for(let k=0;k<2;k++){
+          const last = history.pop(); if(!last) break; board[last.i]='';
+        }
+        log('ИИ откатил время назад.');
+      }
       function cheatShuffleBoard(){
         // rotate board 90deg to ruin plans
         const b=board.slice();
@@ -207,7 +229,7 @@
       }
 
       function place(sym, idx, note=''){
-        if(board[idx]) return false; board[idx]=sym; log((sym==='O'?'ИИ':'Вы')+' поставил на '+idx+'. '+note); return true;
+        if(board[idx]) return false; board[idx]=sym; history.push({p:sym,i:idx}); log((sym==='O'?'ИИ':'Вы')+' поставил на '+idx+'. '+note); return true;
       }
 
       function taunt(msg){ log('<span class="taunt">ИИ:</span> '+msg); }

@@ -208,7 +208,7 @@
           const lastSeg=state.snake.pop();
           if(lastSeg) state.obstacles.add(posKey(tailToDrop||lastSeg));
         }
-        state.speedMul*=2; // insane!
+        state.speedMul*=1.4; // замедлили ускорение: было 2x, теперь 1.4x
         placeApple();
       } else {
         state.snake.pop();
@@ -228,9 +228,20 @@
     function draw(){
       ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      // background grid
-      ctx.fillStyle = '#0b1228';
+      // background gradient
+      const grd = ctx.createLinearGradient(0,0,canvas.width,canvas.height);
+      grd.addColorStop(0,'#071426');
+      grd.addColorStop(1,'#0a0f1f');
+      ctx.fillStyle = grd;
       ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // subtle grid
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth=1;
+      for(let i=0;i<=N;i++){
+        ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,i*CELL); ctx.lineTo(canvas.width,i*CELL); ctx.stroke();
+      }
 
       // darkness mask
       if(state.conf.darkness){
@@ -249,26 +260,25 @@
       // obstacles
       ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--wall');
       state.obstacles.forEach(k=>{
-        const [x,y]=k.split(',').map(Number); rect(x,y,0.9,0.9)
+        const [x,y]=k.split(',').map(Number); roundRect(x,y,0.9,0.9,6,'#3b4154')
       })
 
       // portal
-      if(state.portal){ ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--portal'); rect(state.portal.x,state.portal.y,0.9,0.9) }
+      if(state.portal){ glowRect(state.portal.x,state.portal.y,0.9,0.9,getComputedStyle(document.documentElement).getPropertyValue('--portal')) }
 
       // meteors
       ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--meteor');
-      for(const m of state.meteors) rect(m.x,m.y,0.9,0.9)
+      for(const m of state.meteors) roundRect(m.x,m.y,0.9,0.9,6,'#f59e0b')
 
       // apples
-      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--apple');
-      for(const a of state.apples) rect(a.x,a.y,0.8,0.8)
+      for(const a of state.apples) apple(a.x,a.y)
 
       // snake
       for(let i=state.snake.length-1;i>=0;i--){
         const s=state.snake[i];
-        ctx.fillStyle = i===0 ? getComputedStyle(document.documentElement).getPropertyValue('--head')
-                              : getComputedStyle(document.documentElement).getPropertyValue('--snake');
-        rect(s.x,s.y,0.9,0.9)
+        const color = i===0 ? getComputedStyle(document.documentElement).getPropertyValue('--head')
+                            : getComputedStyle(document.documentElement).getPropertyValue('--snake');
+        snakeSeg(s.x,s.y,color,i===0)
       }
 
       // overlays
@@ -282,8 +292,58 @@
       }
     }
 
-    function rect(x,y,w=1,h=1){
-      const pad = (1-w)/2; ctx.fillRect((x+pad)*CELL,(y+pad)*CELL,w*CELL,h*CELL);
+    function rectRaw(x,y,w,h){ ctx.fillRect(x,y,w,h) }
+    function roundRect(x,y,w=1,h=1,r=6,strokeColor=null){
+      const pad=(1-w)/2; const rx=(x+pad)*CELL, ry=(y+pad)*CELL, rw=w*CELL, rh=h*CELL;
+      const rad=Math.min(r, rw*0.3, rh*0.3);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(rx+rad,ry);
+      ctx.lineTo(rx+rw-rad,ry);
+      ctx.quadraticCurveTo(rx+rw,ry,rx+rw,ry+rad);
+      ctx.lineTo(rx+rw,ry+rh-rad);
+      ctx.quadraticCurveTo(rx+rw,ry+rh,rx+rw-rad,ry+rh);
+      ctx.lineTo(rx+rad,ry+rh);
+      ctx.quadraticCurveTo(rx,ry+rh,rx,ry+rh-rad);
+      ctx.lineTo(rx,ry+rad);
+      ctx.quadraticCurveTo(rx,ry,rx+rad,ry);
+      ctx.closePath();
+      ctx.fill();
+      if(strokeColor){ ctx.strokeStyle=strokeColor; ctx.lineWidth=2; ctx.stroke(); }
+      ctx.restore();
+    }
+    function glowRect(x,y,w,h,color){
+      const pad=(1-w)/2; const rx=(x+pad)*CELL, ry=(y+pad)*CELL, rw=w*CELL, rh=h*CELL;
+      ctx.save();
+      ctx.fillStyle=color.trim();
+      ctx.shadowColor=color.trim();
+      ctx.shadowBlur=18;
+      rectRaw(rx,ry,rw,rh);
+      ctx.restore();
+    }
+    function apple(x,y){
+      const cx=(x+0.5)*CELL, cy=(y+0.5)*CELL, r=CELL*0.35;
+      ctx.save();
+      const grd=ctx.createRadialGradient(cx,cy,2,cx,cy,r);
+      grd.addColorStop(0,'#ffb4b4'); grd.addColorStop(1,'#ef4444');
+      ctx.fillStyle=grd; ctx.shadowColor='#ef4444'; ctx.shadowBlur=12;
+      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+    function snakeSeg(x,y,color,isHead){
+      ctx.save();
+      ctx.fillStyle=color.trim();
+      ctx.shadowColor=color.trim();
+      ctx.shadowBlur=isHead?14:6;
+      roundRect(x,y,0.9,0.9,8);
+      if(isHead){
+        // eyes
+        const cx=(x+0.5)*CELL, cy=(y+0.5)*CELL, d= CELL*0.18;
+        ctx.fillStyle='#0f172a';
+        ctx.beginPath(); ctx.arc(cx-d,cy-d,2,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+d,cy-d,2,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
     }
 
     function updateStats(){
