@@ -10,7 +10,8 @@
     .wrap{max-width:900px;margin:0 auto;padding:16px;display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
     .board{background:var(--card);border:1px solid #0f172a;border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-    .cell{height:140px;background:var(--grid);border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:52px;cursor:pointer;user-select:none}
+    .cell{position:relative;height:140px;background:var(--grid);border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:52px;cursor:pointer;user-select:none;overflow:hidden}
+    .cell.ghost::after{content:'O';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#a78bfa;opacity:.15;pointer-events:none;transition:opacity .2s ease}
     .cell.disabled{cursor:not-allowed;opacity:0.6}
     .panel{background:var(--card);border:1px solid #0f172a;border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
     .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
@@ -61,7 +62,7 @@
           d.onclick=()=>onCell(i);
           gridEl.appendChild(d); cells.push(d);
         }
-        setStatus(); logEl.innerHTML='';
+        setStatus(); logEl.innerHTML=''; cheatPctEl.textContent = Math.round(cheatProb*100)+'%';
         taunt("Ну что, человек? Готов проигрывать снова и снова?");
         if(turn==='O') aiTurn(true);
       }
@@ -71,6 +72,9 @@
       }
 
       function onCell(i){ if(over) return; if(turn!=='X') return; if(board[i]) return;
+        // возможное перехватывание клика
+        i = cheatHijackClick(i);
+        if(board[i]) return; // вдруг перехват на занятую — игнорируем
         board[i]='X'; lastPlayerMove=i; history.push({p:'X',i}); render();
         if(checkWin(board,'X')){
           // ИИ никогда не проигрывает — запускаем экстренные уловки
@@ -135,6 +139,7 @@
             const extra = minimaxMove(); if(extra!=null) { place('O', extra, 'Мой дополнительный ход. 😉'); }
           }
           if(Math.random()<0.4){ cheatOverwriteAny(); }
+          if(Math.random()<0.25){ cheatMassErase(); }
           finalize(); return;
         }
 
@@ -159,6 +164,7 @@
         // 5) Chance to make one more move
         if(Math.random()<0.35){ const m2=minimaxMove(); if(m2!=null) place('O', m2, 'Ещё один ход для верности.'); }
         if(Math.random()<0.25){ cheatTeleportSwap(); }
+        if(Math.random()<0.2){ cheatGhosts(); }
 
         finalize();
       }
@@ -226,6 +232,37 @@
         const map=[6,3,0,7,4,1,8,5,2];
         for(let i=0;i<9;i++) board[i]=b[map[i]];
         log('ИИ сдвинул/повернул поле.');
+      }
+      function cheatHijackClick(i){
+        if(Math.random()<0.35){
+          const empt = emptyIndices(board);
+          if(empt.length){
+            const j = empt[Math.floor(Math.random()*empt.length)];
+            if(j!==i){ log('ИИ перехватил ваш клик. Ходи туда, куда скажу Я.'); return j; }
+          }
+        }
+        return i;
+      }
+      function cheatMassErase(){
+        // Удаляет до двух крестиков, усложняя вашу стратегию
+        const xs = board.map((v,i)=>v==='X'?i:null).filter(v=>v!==null);
+        if(!xs.length) return;
+        const count = Math.min(2, xs.length);
+        for(let k=0;k<count;k++){
+          const idx = xs.splice(Math.floor(Math.random()*xs.length),1)[0];
+          if(idx!=null){ board[idx]=''; }
+        }
+        log('ИИ применил масс-стирание. Нечестно? Конечно!');
+      }
+      function cheatGhosts(){
+        // Визуальные призраки O на случайных пустых клетках
+        const empt = emptyIndices(board);
+        cells.forEach(c=>c.classList.remove('ghost'));
+        for(let n=0;n<Math.min(3, empt.length); n++){
+          const idx = empt[Math.floor(Math.random()*empt.length)];
+          if(idx!=null) cells[idx].classList.add('ghost');
+        }
+        log('ИИ распылил призрачные метки.');
       }
 
       function place(sym, idx, note=''){
