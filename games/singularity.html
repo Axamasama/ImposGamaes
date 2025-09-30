@@ -122,11 +122,14 @@
         let acx = null;
 
         const levels = [
-          { rings: 1, sectors: 10, ballSpeed: 3, paddle: 0.9, bonusRate: 0.2 },
+          { rings: 1, sectors: 10, ballSpeed: 3.0, paddle: 0.9, bonusRate: 0.2 },
           { rings: 2, sectors: 12, ballSpeed: 3.2, paddle: 0.85, bonusRate: 0.22 },
-          { rings: 2, sectors: 14, ballSpeed: 3.5, paddle: 0.8, bonusRate: 0.24 },
-          { rings: 3, sectors: 14, ballSpeed: 3.8, paddle: 0.78, bonusRate: 0.26 },
-          { rings: 3, sectors: 16, ballSpeed: 4.1, paddle: 0.76, bonusRate: 0.28 },
+          { rings: 2, sectors: 14, ballSpeed: 3.5, paddle: 0.82, bonusRate: 0.24 },
+          { rings: 3, sectors: 14, ballSpeed: 3.8, paddle: 0.8, bonusRate: 0.26 },
+          { rings: 3, sectors: 16, ballSpeed: 4.2, paddle: 0.78, bonusRate: 0.28 },
+          { rings: 4, sectors: 16, ballSpeed: 4.6, paddle: 0.76, bonusRate: 0.3 },
+          { rings: 4, sectors: 18, ballSpeed: 5.0, paddle: 0.74, bonusRate: 0.32 },
+          { rings: 5, sectors: 18, ballSpeed: 5.4, paddle: 0.72, bonusRate: 0.34 },
         ];
 
         function newState(i) {
@@ -155,7 +158,13 @@
               const a1 = ((k + 1) * 2 * Math.PI) / L.sectors;
               // pattern gaps on outer ring for variety
               if (i % 2 === 1 && r === 0 && k % 5 === 0) continue;
-              s.bricks.push({ rad, r1: rad - ringW, a0, a1, hp: 1 });
+              // assign type
+              let type = 'normal';
+              const roll = Math.random();
+              if (roll < 0.15 && r >= 1) type = 'hard';
+              else if (roll > 0.85 && r <= L.rings - 2) type = 'explosive';
+              const hp = type === 'hard' ? 2 : 1;
+              s.bricks.push({ rad, r1: rad - ringW, a0, a1, hp, type });
             }
           }
           // spawn one ball
@@ -341,9 +350,12 @@
               const r = Math.hypot(b.x - C.x, b.y - C.y);
               const a = normalize(Math.atan2(b.y - C.y, b.x - C.x));
               if (r <= br.rad && r >= br.r1 && angleIn(a, br.a0, br.a1)) {
-                br.hp = 0;
-                state.score += 10;
-                maybeBonus(b.x, b.y);
+                br.hp -= 1;
+                if (br.hp <= 0) {
+                  state.score += 10;
+                  if (br.type === 'explosive') explodeBrick(br);
+                  maybeBonus(b.x, b.y);
+                }
                 // reflect approximately by radial normal
                 const n = { x: (b.x - C.x) / r, y: (b.y - C.y) / r };
                 const v = { x: b.vx, y: b.vy };
@@ -493,6 +505,31 @@
           }
           beep(300, 0.08);
         }
+        function explodeBrick(origin) {
+          const originCenterA = (origin.a0 + origin.a1) / 2;
+          const da = (origin.a1 - origin.a0) * 1.1;
+          for (const br of state.bricks) {
+            if (br.hp <= 0) continue;
+            // same ring neighbors within ~one sector
+            if (Math.abs(br.rad - origin.rad) < 1e-6) {
+              const center = (br.a0 + br.a1) / 2;
+              const d = Math.abs(shortestAngle(center, originCenterA));
+              if (d <= da) {
+                br.hp = 0;
+                const ax = C.x + Math.cos(center) * ((br.rad + br.r1) / 2);
+                const ay = C.y + Math.sin(center) * ((br.rad + br.r1) / 2);
+                emitBrickParticles(ax, ay);
+              }
+            }
+            // adjacent inner ring under arc
+            if (Math.abs(br.rad - origin.r1) < 20) {
+              const center = (br.a0 + br.a1) / 2;
+              const d = Math.abs(shortestAngle(center, originCenterA));
+              if (d <= (origin.a1 - origin.a0) / 2) br.hp = 0;
+            }
+          }
+          beep(360, 0.06);
+        }
 
         function emitBrickParticles(x, y) {
           for (let i = 0; i < 14; i++) {
@@ -608,7 +645,14 @@
           // bricks
           for (const br of state.bricks) {
             if (br.hp <= 0) continue;
-            sector(br.r1, br.rad, br.a0, br.a1, '#0f172a', '#64ffda');
+            const border =
+              br.type === 'explosive'
+                ? '#f87171'
+                : br.type === 'hard' && br.hp > 1
+                  ? '#ffd166'
+                  : '#64ffda';
+            const fill = br.type === 'hard' && br.hp > 1 ? '#111827' : '#0f172a';
+            sector(br.r1, br.rad, br.a0, br.a1, fill, border);
           }
 
           // bonuses

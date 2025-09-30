@@ -261,6 +261,8 @@
             meteors: [],
             portal: null,
             speedMul: 1,
+            slowTimer: 0,
+            slowBonuses: [],
             running: false,
             frames: 0,
             over: false,
@@ -373,6 +375,16 @@
             tries++;
           } while ((occupied(p) || !isReachable(headPos(), p)) && tries < 500);
           state.apples.push(p);
+        }
+
+        function placeSlowBonus() {
+          let p;
+          let tries = 0;
+          do {
+            p = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) };
+            tries++;
+          } while ((occupied(p) || !isReachable(headPos(), p)) && tries < 500);
+          state.slowBonuses.push(p);
         }
 
         function placePortal() {
@@ -501,7 +513,7 @@
         function loop(ts) {
           requestAnimationFrame(loop);
           if (!state) return;
-          const speed = state.conf.baseSpeed * state.speedMul; // higher -> faster
+          const speed = state.conf.baseSpeed * state.speedMul * (state.slowTimer > 0 ? 0.5 : 1); // higher -> faster
           const interval = Math.max(30, 220 - speed * 120); // ms per step
           if (!last) last = ts;
           const delta = ts - last;
@@ -514,6 +526,12 @@
         requestAnimationFrame(loop);
 
         function tick() {
+          state.frames++;
+          if (state.slowTimer > 0) state.slowTimer--;
+          // spawn slow bonus sometimes
+          if (state.frames % 90 === 0 && state.slowBonuses.length === 0 && Math.random() < 0.35) {
+            placeSlowBonus();
+          }
           // move meteors
           for (const m of state.meteors) {
             m.x += m.dx;
@@ -573,6 +591,18 @@
               ate = true;
               tailToDrop = state.snake[state.snake.length - 1];
               state.apples.splice(i, 1);
+              break;
+            }
+          }
+
+          // slow bonus pickup
+          for (let i = 0; i < state.slowBonuses.length; i++) {
+            const b = state.slowBonuses[i];
+            if (b.x === head.x && b.y === head.y) {
+              state.slowTimer = 240; // ~ few seconds of slow
+              state.slowBonuses.splice(i, 1);
+              burst(head.x, head.y, '#22d3ee');
+              beep(520, 0.04);
               break;
             }
           }
@@ -683,6 +713,8 @@
 
           // apples
           for (const a of state.apples) apple(a.x, a.y);
+          // slow bonuses
+          for (const b of state.slowBonuses) slowIcon(b.x, b.y);
           // particles
           for (const p of state.particles) {
             const cxp = (p.x + 0.5) * CELL;
@@ -782,6 +814,28 @@
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
           ctx.fill();
+          ctx.restore();
+        }
+        function slowIcon(x, y) {
+          const cx = (x + 0.5) * CELL,
+            cy = (y + 0.5) * CELL,
+            r = CELL * 0.28;
+          ctx.save();
+          ctx.strokeStyle = '#22d3ee';
+          ctx.shadowColor = '#22d3ee';
+          ctx.shadowBlur = 10;
+          ctx.lineWidth = 3;
+          // draw a simple hourglass
+          ctx.beginPath();
+          ctx.moveTo(cx - r, cy - r);
+          ctx.lineTo(cx + r, cy - r);
+          ctx.moveTo(cx - r, cy + r);
+          ctx.lineTo(cx + r, cy + r);
+          ctx.moveTo(cx - r, cy - r);
+          ctx.lineTo(cx + r, cy + r);
+          ctx.moveTo(cx + r, cy - r);
+          ctx.lineTo(cx - r, cy + r);
+          ctx.stroke();
           ctx.restore();
         }
         function burst(x, y, color = '#ef4444') {
