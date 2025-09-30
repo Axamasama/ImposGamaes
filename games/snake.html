@@ -1,361 +1,866 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Космическая змейка</title>
-  <style>
-    :root{
-      --bg: #0b1020; --grid:#0f172a; --snake:#22d3ee; --head:#38bdf8; --apple:#ef4444; --wall:#64748b; --portal:#a78bfa; --meteor:#f59e0b;
-    }
-    html,body{height:100%;margin:0;background:linear-gradient(180deg,#0b1020,#020617);color:#e5e7eb;font-family:Inter,system-ui,Arial}
-    .wrap{max-width:1100px;margin:0 auto;padding:10px;display:flex;gap:16px;align-items:flex-start}
-    canvas{background:var(--grid);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
-    .panel{width:320px;background:#0a0f1e;border:1px solid #0f172a;border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    h1{margin:0 0 6px 0;font-size:18px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
-    button{background:#2563eb;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
-    .label{font-size:12px;color:#94a3b8}
-    .stat{font-weight:700}
-    .lvl{display:flex;gap:6px}
-    .lvl button{background:#111827;border:1px solid #1f2937}
-    .lvl button.active{background:#1d4ed8}
-    .note{color:#9ca3af;font-size:12px;line-height:1.4}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <canvas id="c" width="720" height="720"></canvas>
-    <aside class="panel">
-      <h1>Космическая змейка</h1>
-      <div class="row">
-        <button id="play">Играть/Пауза (Space)</button>
-        <button id="restart">Заново (R)</button>
-      </div>
-      <div class="row lvl" id="levels"></div>
-      <div class="row">
-        <div><div class="label">Уровень</div><div class="stat" id="statLevel">1</div></div>
-        <div><div class="label">Скорость</div><div class="stat" id="statSpeed">1x</div></div>
-        <div><div class="label">Длина</div><div class="stat" id="statLen">0</div></div>
-      </div>
-      <p class="note">
-        Правила: Начальная длина 8. Яблоко не удлиняет — наоборот, отпадает хвост и превращается в препятствие, а скорость удваивается. Когда длина станет 2 — появляется портал, войдите в него, чтобы пройти уровень. Каждый следующий уровень — злее.
-      </p>
-      <p class="note">Управление: Стрелки / WASD. Портал фиолетовый. Метеоры движутся. Удачи 🙂</p>
-    </aside>
-  </div>
-  <script>
-  (function(){
-    const canvas = document.getElementById('c');
-    const ctx = canvas.getContext('2d');
-    const N = 24; // cells per side
-    const CELL = Math.floor(canvas.width / N);
-    const SPEED_BASE = 6; // frames per step lower is faster (we'll compute interval)
-
-    const DIRS = {ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],
-                  w:[0,-1],s:[0,1],a:[-1,0],d:[1,0]};
-
-    const levels = [
-      // Level 1: tutorial impossible
-      {name:'I', baseSpeed:1, walls:[], meteors:0, darkness:false, wrap:false, apples:1},
-      // Level 2: debris everywhere
-      {name:'II', baseSpeed:1.2, walls:'random20', meteors:1, darkness:false, wrap:false, apples:1},
-      // Level 3: moving comets
-      {name:'III', baseSpeed:1.3, walls:'cross', meteors:3, darkness:false, wrap:false, apples:1},
-      // Level 4: narrow corridors
-      {name:'IV', baseSpeed:1.4, walls:'labyrinth', meteors:4, darkness:false, wrap:false, apples:1},
-      // Level 5: darkness
-      {name:'V', baseSpeed:1.5, walls:'labyrinth-hard', meteors:5, darkness:true, wrap:false, apples:1},
-    ];
-
-    // UI level buttons
-    const lvlWrap = document.getElementById('levels');
-    levels.forEach((lv,i)=>{
-      const b=document.createElement('button');b.textContent=lv.name;b.onclick=()=>start(i);lvlWrap.appendChild(b)
-    })
-
-    let state;
-    function newState(levelIndex){
-      const conf = levels[levelIndex];
-      const snake = [];
-      const startX = Math.floor(N/2), startY=Math.floor(N/2);
-      for(let i=0;i<8;i++) snake.push({x:startX-i,y:startY});
-      return {levelIndex, conf,
-        snake, dir:{x:1,y:0}, pendingDir:{x:1,y:0},
-        obstacles:new Set(), apples:[], meteors:[], portal:null,
-        speedMul:1, running:false, frames:0, over:false, victory:false
-      };
-    }
-
-    function key(e){
-      const d=DIRS[e.key]; if(!d) return;
-      const nd={x:d[0],y:d[1]};
-      // prevent reversing into self
-      if(state && (nd.x!==-state.dir.x || nd.y!==-state.dir.y)) state.pendingDir=nd;
-    }
-    window.addEventListener('keydown',e=>{
-      if(e.key===' '){toggle(); e.preventDefault();}
-      else if(e.key==='r' || e.key==='R'){start(state?state.levelIndex:0)}
-      else key(e)
-    });
-    document.getElementById('play').onclick=toggle;
-    document.getElementById('restart').onclick=()=>start(state?state.levelIndex:0);
-
-    function posKey(p){return p.x+','+p.y}
-    function inBounds(p){return p.x>=0&&p.y>=0&&p.x<N&&p.y<N}
-
-    function addWalls(kind){
-      const add=(x,y)=>state.obstacles.add(x+','+y);
-      if(kind==='random20'){
-        for(let k=0;k<20;k++) add(Math.floor(Math.random()*N),Math.floor(Math.random()*N));
-      } else if(kind==='cross'){
-        for(let i=0;i<N;i++){add(i,Math.floor(N/2));add(Math.floor(N/2),i)}
-      } else if(kind==='labyrinth' || kind==='labyrinth-hard'){
-        for(let y=2;y<N-2;y+=2){for(let x=2;x<N-2;x+=2){add(x,y)}}
-        if(kind==='labyrinth-hard'){
-          for(let i=0;i<N;i++){add(i,0);add(i,N-1);add(0,i);add(N-1,i)}
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Космическая змейка</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --grid: #0f172a;
+        --snake: #22d3ee;
+        --head: #38bdf8;
+        --apple: #ef4444;
+        --wall: #64748b;
+        --portal: #a78bfa;
+        --meteor: #f59e0b;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: linear-gradient(180deg, #0b1020, #020617);
+        color: #e5e7eb;
+        font-family: Inter, system-ui, Arial;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 10px;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      canvas {
+        background: var(--grid);
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        width: 100%;
+        height: auto;
+        max-width: 720px;
+        touch-action: none;
+      }
+      .panel {
+        width: 320px;
+        background: #0a0f1e;
+        border: 1px solid #0f172a;
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      @media (max-width: 768px) {
+        .wrap {
+          flex-direction: column;
+        }
+        .panel {
+          width: 100%;
         }
       }
-    }
-
-    function placeApple(){
-      let p; do {p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}}
-      while(occupied(p));
-      state.apples.push(p);
-    }
-
-    function placePortal(){
-      let p; do {p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}} while(occupied(p));
-      state.portal=p;
-    }
-
-    function spawnMeteors(k){
-      for(let i=0;i<k;i++){
-        let p; do{p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)}} while(occupied(p));
-        const dirs=[[1,0],[-1,0],[0,1],[0,-1]]; const d=dirs[Math.floor(Math.random()*dirs.length)];
-        state.meteors.push({x:p.x,y:p.y,dx:d[0],dy:d[1]});
+      .mobile-ctrl {
+        position: fixed;
+        left: 50%;
+        bottom: 14px;
+        transform: translateX(-50%);
+        display: none;
+        gap: 8px;
+        z-index: 10;
       }
-    }
-
-    function occupied(p){
-      if(state.obstacles.has(posKey(p))) return true;
-      if(state.portal && p.x===state.portal.x && p.y===state.portal.y) return true;
-      for(const s of state.snake) if(s.x===p.x&&s.y===p.y) return true;
-      for(const a of state.apples) if(a.x===p.x&&a.y===p.y) return true;
-      for(const m of state.meteors) if(m.x===p.x&&m.y===p.y) return true;
-      return false;
-    }
-
-    function start(levelIndex=0){
-      state=newState(levelIndex);
-      // walls
-      if(state.conf.walls && typeof state.conf.walls==='string') addWalls(state.conf.walls);
-      // apples
-      for(let i=0;i<state.conf.apples;i++) placeApple();
-      // meteors
-      spawnMeteors(state.conf.meteors||0);
-      updateStats();
-      draw();
-    }
-
-    function toggle(){ if(!state) start(0); state.running=!state.running }
-
-    // Game loop
-    let last=0; const STEP=1000/12; // base rendering fps
-    function loop(ts){
-      requestAnimationFrame(loop);
-      if(!state) return;
-      const speed = state.conf.baseSpeed * state.speedMul; // higher -> faster
-      const interval = Math.max(30, 220 - speed*120); // ms per step
-      if(!last) last=ts; const delta=ts-last;
-      if(delta>=interval){ last=ts; if(state.running&&!state.over&&!state.victory) tick(); draw(); }
-    }
-    requestAnimationFrame(loop);
-
-    function tick(){
-      // move meteors
-      for(const m of state.meteors){
-        m.x+=m.dx; m.y+=m.dy;
-        if(m.x<0||m.y<0||m.x>=N||m.y>=N){ m.x=(m.x+N)%N; m.y=(m.y+N)%N; }
-        // bounce on walls
-        if(state.obstacles.has(posKey(m))){ m.x-=m.dx; m.y-=m.dy; m.dx*=-1; m.dy*=-1; }
+      .mobile-ctrl button {
+        background: #111827;
+        border: 1px solid #1f2937;
+        padding: 12px 14px;
+        border-radius: 10px;
+        font-weight: 800;
       }
-
-      // move snake
-      state.dir=state.pendingDir;
-      const head={x:state.snake[0].x+state.dir.x,y:state.snake[0].y+state.dir.y};
-      if(!state.conf.wrap && !inBounds(head)) { state.over=true; return; }
-      head.x=(head.x+N)%N; head.y=(head.y+N)%N;
-
-      // collisions
-      if(state.obstacles.has(posKey(head))) { state.over=true; return; }
-      for(const m of state.meteors){ if(m.x===head.x&&m.y===head.y){ state.over=true; return; }}
-      for(let i=0;i<state.snake.length;i++){ const s=state.snake[i]; if(s.x===head.x&&s.y===head.y){ state.over=true; return; }}
-
-      // apples
-      let ate=false; let tailToDrop=null;
-      for(let i=0;i<state.apples.length;i++){
-        const a=state.apples[i];
-        if(a.x===head.x&&a.y===head.y){ ate=true; tailToDrop=state.snake[state.snake.length-1]; state.apples.splice(i,1); break; }
-      }
-
-      // advance body
-      state.snake.unshift(head);
-      if(ate){
-        // drop tail as obstacle and speed up
-        if(state.snake.length>1){
-          state.snake.pop(); // remove last (we'll pop one more below to shrink)
-          const lastSeg=state.snake.pop();
-          if(lastSeg) state.obstacles.add(posKey(tailToDrop||lastSeg));
+      @media (max-width: 768px) {
+        .mobile-ctrl {
+          display: flex;
         }
-        state.speedMul*=1.4; // замедлили ускорение: было 2x, теперь 1.4x
-        placeApple();
-      } else {
-        state.snake.pop();
       }
-
-      // portal
-      if(!state.portal && state.snake.length<=2) placePortal();
-      if(state.portal && head.x===state.portal.x && head.y===state.portal.y){
-        // next level or victory
-        if(state.levelIndex<levels.length-1){ start(state.levelIndex+1); }
-        else { state.victory=true; state.running=false; }
+      h1 {
+        margin: 0 0 6px 0;
+        font-size: 18px;
       }
-
-      updateStats();
-    }
-
-    function draw(){
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-
-      // background gradient
-      const grd = ctx.createLinearGradient(0,0,canvas.width,canvas.height);
-      grd.addColorStop(0,'#071426');
-      grd.addColorStop(1,'#0a0f1f');
-      ctx.fillStyle = grd;
-      ctx.fillRect(0,0,canvas.width,canvas.height);
-
-      // subtle grid
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-      ctx.lineWidth=1;
-      for(let i=0;i<=N;i++){
-        ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,canvas.height); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0,i*CELL); ctx.lineTo(canvas.width,i*CELL); ctx.stroke();
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 8px 0;
       }
-
-      // darkness mask
-      if(state.conf.darkness){
-        ctx.save();
-        ctx.fillStyle = '#000000';
-        ctx.globalAlpha = 0.75;
-        ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.globalCompositeOperation = 'destination-out';
-        const head=state.snake[0];
-        ctx.beginPath();
-        ctx.arc((head.x+0.5)*CELL,(head.y+0.5)*CELL, CELL*3, 0, Math.PI*2);
-        ctx.fill();
-        ctx.restore();
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 700;
+        cursor: pointer;
       }
-
-      // obstacles
-      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--wall');
-      state.obstacles.forEach(k=>{
-        const [x,y]=k.split(',').map(Number); roundRect(x,y,0.9,0.9,6,'#3b4154')
-      })
-
-      // portal
-      if(state.portal){ glowRect(state.portal.x,state.portal.y,0.9,0.9,getComputedStyle(document.documentElement).getPropertyValue('--portal')) }
-
-      // meteors
-      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--meteor');
-      for(const m of state.meteors) roundRect(m.x,m.y,0.9,0.9,6,'#f59e0b')
-
-      // apples
-      for(const a of state.apples) apple(a.x,a.y)
-
-      // snake
-      for(let i=state.snake.length-1;i>=0;i--){
-        const s=state.snake[i];
-        const color = i===0 ? getComputedStyle(document.documentElement).getPropertyValue('--head')
-                            : getComputedStyle(document.documentElement).getPropertyValue('--snake');
-        snakeSeg(s.x,s.y,color,i===0)
+      .label {
+        font-size: 12px;
+        color: #94a3b8;
       }
-
-      // overlays
-      if(state.over||state.victory){
-        ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle='#e5e7eb'; ctx.textAlign='center';
-        ctx.font='bold 42px Inter, system-ui';
-        ctx.fillText(state.victory?'ВСЕ УРОВНИ ПРОЙДЕНЫ!':'ПРОВАЛ!', canvas.width/2, canvas.height/2);
-        ctx.font='16px Inter, system-ui';
-        ctx.fillText('Нажмите R чтобы начать заново', canvas.width/2, canvas.height/2+30);
+      .stat {
+        font-weight: 700;
       }
-    }
-
-    function rectRaw(x,y,w,h){ ctx.fillRect(x,y,w,h) }
-    function roundRect(x,y,w=1,h=1,r=6,strokeColor=null){
-      const pad=(1-w)/2; const rx=(x+pad)*CELL, ry=(y+pad)*CELL, rw=w*CELL, rh=h*CELL;
-      const rad=Math.min(r, rw*0.3, rh*0.3);
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(rx+rad,ry);
-      ctx.lineTo(rx+rw-rad,ry);
-      ctx.quadraticCurveTo(rx+rw,ry,rx+rw,ry+rad);
-      ctx.lineTo(rx+rw,ry+rh-rad);
-      ctx.quadraticCurveTo(rx+rw,ry+rh,rx+rw-rad,ry+rh);
-      ctx.lineTo(rx+rad,ry+rh);
-      ctx.quadraticCurveTo(rx,ry+rh,rx,ry+rh-rad);
-      ctx.lineTo(rx,ry+rad);
-      ctx.quadraticCurveTo(rx,ry,rx+rad,ry);
-      ctx.closePath();
-      ctx.fill();
-      if(strokeColor){ ctx.strokeStyle=strokeColor; ctx.lineWidth=2; ctx.stroke(); }
-      ctx.restore();
-    }
-    function glowRect(x,y,w,h,color){
-      const pad=(1-w)/2; const rx=(x+pad)*CELL, ry=(y+pad)*CELL, rw=w*CELL, rh=h*CELL;
-      ctx.save();
-      ctx.fillStyle=color.trim();
-      ctx.shadowColor=color.trim();
-      ctx.shadowBlur=18;
-      rectRaw(rx,ry,rw,rh);
-      ctx.restore();
-    }
-    function apple(x,y){
-      const cx=(x+0.5)*CELL, cy=(y+0.5)*CELL, r=CELL*0.35;
-      ctx.save();
-      const grd=ctx.createRadialGradient(cx,cy,2,cx,cy,r);
-      grd.addColorStop(0,'#ffb4b4'); grd.addColorStop(1,'#ef4444');
-      ctx.fillStyle=grd; ctx.shadowColor='#ef4444'; ctx.shadowBlur=12;
-      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-      ctx.restore();
-    }
-    function snakeSeg(x,y,color,isHead){
-      ctx.save();
-      ctx.fillStyle=color.trim();
-      ctx.shadowColor=color.trim();
-      ctx.shadowBlur=isHead?14:6;
-      roundRect(x,y,0.9,0.9,8);
-      if(isHead){
-        // eyes
-        const cx=(x+0.5)*CELL, cy=(y+0.5)*CELL, d= CELL*0.18;
-        ctx.fillStyle='#0f172a';
-        ctx.beginPath(); ctx.arc(cx-d,cy-d,2,0,Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(cx+d,cy-d,2,0,Math.PI*2); ctx.fill();
+      .lvl {
+        display: flex;
+        gap: 6px;
       }
-      ctx.restore();
-    }
+      .lvl button {
+        background: #111827;
+        border: 1px solid #1f2937;
+      }
+      .lvl button.active {
+        background: #1d4ed8;
+      }
+      .note {
+        color: #9ca3af;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <canvas id="c" width="720" height="720"></canvas>
+      <aside class="panel">
+        <h1>Космическая змейка</h1>
+        <div class="row">
+          <button id="play">Играть/Пауза (Space)</button>
+          <button id="restart">Заново (R)</button>
+        </div>
+        <div class="row lvl" id="levels"></div>
+        <div class="row">
+          <div>
+            <div class="label">Уровень</div>
+            <div class="stat" id="statLevel">1</div>
+          </div>
+          <div>
+            <div class="label">Скорость</div>
+            <div class="stat" id="statSpeed">1x</div>
+          </div>
+          <div>
+            <div class="label">Длина</div>
+            <div class="stat" id="statLen">0</div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="sound">Звук: выкл</button>
+        </div>
+        <p class="note">
+          Правила: Начальная длина 8. Яблоко не удлиняет — наоборот, отпадает хвост и превращается в
+          препятствие, а скорость увеличивается в 1.4 раза. Когда длина станет 2 — появляется
+          портал, войдите в него, чтобы пройти уровень. Каждый следующий уровень — злее.
+        </p>
+        <p class="note">
+          Управление: Стрелки / WASD. Портал фиолетовый. Метеоры движутся. Удачи 🙂
+        </p>
+      </aside>
+    </div>
+    <div class="mobile-ctrl">
+      <button id="btnLeft">◀︎</button>
+      <button id="btnUp">▲</button>
+      <button id="btnDown">▼</button>
+      <button id="btnRight">▶︎</button>
+    </div>
+    <script>
+      (function () {
+        const canvas = document.getElementById('c');
+        const ctx = canvas.getContext('2d');
+        const N = 24; // cells per side
+        const CELL = Math.floor(canvas.width / N);
+        const SPEED_BASE = 6; // frames per step lower is faster (we'll compute interval)
 
-    function updateStats(){
-      document.getElementById('statLevel').textContent = (state.levelIndex+1);
-      document.getElementById('statSpeed').textContent = (state.conf.baseSpeed*state.speedMul).toFixed(1)+'x';
-      document.getElementById('statLen').textContent = state.snake.length;
-      Array.from(lvlWrap.children).forEach((b,i)=>b.classList.toggle('active',i===state.levelIndex));
-    }
+        const DIRS = {
+          ArrowUp: [0, -1],
+          ArrowDown: [0, 1],
+          ArrowLeft: [-1, 0],
+          ArrowRight: [1, 0],
+          w: [0, -1],
+          s: [0, 1],
+          a: [-1, 0],
+          d: [1, 0],
+        };
 
-    // init
-    start(0);
-  })();
-  </script>
+        const levels = [
+          // Level 1: tutorial impossible
+          {
+            name: 'I',
+            baseSpeed: 1,
+            walls: [],
+            meteors: 0,
+            darkness: false,
+            wrap: false,
+            apples: 1,
+          },
+          // Level 2: debris everywhere
+          {
+            name: 'II',
+            baseSpeed: 1.2,
+            walls: 'random20',
+            meteors: 1,
+            darkness: false,
+            wrap: false,
+            apples: 1,
+          },
+          // Level 3: moving comets
+          {
+            name: 'III',
+            baseSpeed: 1.3,
+            walls: 'cross',
+            meteors: 3,
+            darkness: false,
+            wrap: false,
+            apples: 1,
+          },
+          // Level 4: narrow corridors
+          {
+            name: 'IV',
+            baseSpeed: 1.4,
+            walls: 'labyrinth',
+            meteors: 4,
+            darkness: false,
+            wrap: false,
+            apples: 1,
+          },
+          // Level 5: darkness
+          {
+            name: 'V',
+            baseSpeed: 1.5,
+            walls: 'labyrinth-hard',
+            meteors: 5,
+            darkness: true,
+            wrap: false,
+            apples: 1,
+          },
+        ];
+
+        // UI level buttons
+        const lvlWrap = document.getElementById('levels');
+        levels.forEach((lv, i) => {
+          const b = document.createElement('button');
+          b.textContent = lv.name;
+          b.onclick = () => start(i);
+          lvlWrap.appendChild(b);
+        });
+
+        let state;
+        let soundOn = false;
+        let acx = null;
+        function newState(levelIndex) {
+          const conf = levels[levelIndex];
+          return {
+            levelIndex,
+            conf,
+            snake: [],
+            dir: { x: 1, y: 0 },
+            pendingDir: { x: 1, y: 0 },
+            obstacles: new Set(),
+            apples: [],
+            meteors: [],
+            portal: null,
+            speedMul: 1,
+            running: false,
+            frames: 0,
+            over: false,
+            victory: false,
+            particles: [],
+          };
+        }
+
+        function key(e) {
+          const d = DIRS[e.key];
+          if (!d) return;
+          const nd = { x: d[0], y: d[1] };
+          // prevent reversing into self
+          if (state && (nd.x !== -state.dir.x || nd.y !== -state.dir.y)) state.pendingDir = nd;
+        }
+        window.addEventListener('keydown', (e) => {
+          if (e.key === ' ') {
+            toggle();
+            e.preventDefault();
+          } else if (e.key === 'r' || e.key === 'R') {
+            start(state ? state.levelIndex : 0);
+          } else key(e);
+        });
+        document.getElementById('play').onclick = toggle;
+        document.getElementById('restart').onclick = () => start(state ? state.levelIndex : 0);
+        // touch swipe on canvas
+        let ts = null;
+        canvas.addEventListener(
+          'touchstart',
+          (e) => {
+            if (!e.touches.length) return;
+            ts = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          },
+          { passive: true }
+        );
+        canvas.addEventListener(
+          'touchmove',
+          (e) => {
+            if (!ts || !e.touches.length) return;
+            const dx = e.touches[0].clientX - ts.x;
+            const dy = e.touches[0].clientY - ts.y;
+            const adx = Math.abs(dx),
+              ady = Math.abs(dy);
+            if (adx + ady > 24) {
+              const dir = adx > ady ? (dx > 0 ? [1, 0] : [-1, 0]) : dy > 0 ? [0, 1] : [0, -1];
+              const nd = { x: dir[0], y: dir[1] };
+              if (state && (nd.x !== -state.dir.x || nd.y !== -state.dir.y)) state.pendingDir = nd;
+              ts = null;
+            }
+          },
+          { passive: true }
+        );
+        // on-screen buttons
+        const bindBtn = (id, nd) =>
+          (document.getElementById(id).onclick = () => {
+            if (state && (nd.x !== -state.dir.x || nd.y !== -state.dir.y)) state.pendingDir = nd;
+          });
+        bindBtn('btnLeft', { x: -1, y: 0 });
+        bindBtn('btnRight', { x: 1, y: 0 });
+        bindBtn('btnUp', { x: 0, y: -1 });
+        bindBtn('btnDown', { x: 0, y: 1 });
+
+        function posKey(p) {
+          return p.x + ',' + p.y;
+        }
+        function inBounds(p) {
+          return p.x >= 0 && p.y >= 0 && p.x < N && p.y < N;
+        }
+
+        function addWalls(kind) {
+          const add = (x, y) => state.obstacles.add(x + ',' + y);
+          if (kind === 'random20') {
+            for (let k = 0; k < 20; k++) {
+              const x = Math.floor(Math.random() * N),
+                y = Math.floor(Math.random() * N);
+              if (Math.abs(x - N / 2) < 3 && Math.abs(y - N / 2) < 3) continue; // не блокируем центр
+              add(x, y);
+            }
+          } else if (kind === 'cross') {
+            const mid = Math.floor(N / 2);
+            for (let i = 0; i < N; i++) {
+              if (i % 6 === 0) continue; // делаем проходы
+              add(i, mid);
+              add(mid, i);
+            }
+          } else if (kind === 'labyrinth' || kind === 'labyrinth-hard') {
+            for (let y = 2; y < N - 2; y += 2) {
+              for (let x = 2; x < N - 2; x += 2) {
+                if ((x + y) % 6 !== 0) add(x, y);
+              }
+            }
+            if (kind === 'labyrinth-hard') {
+              for (let i = 0; i < N; i++) {
+                if (i % 5 !== 0) {
+                  add(i, 0);
+                  add(i, N - 1);
+                  add(0, i);
+                  add(N - 1, i);
+                }
+              }
+            }
+          }
+        }
+
+        function placeApple() {
+          let p;
+          let tries = 0;
+          do {
+            p = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) };
+            tries++;
+          } while ((occupied(p) || !isReachable(headPos(), p)) && tries < 500);
+          state.apples.push(p);
+        }
+
+        function placePortal() {
+          let p;
+          do {
+            p = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) };
+          } while (occupied(p));
+          state.portal = p;
+        }
+
+        function spawnMeteors(k) {
+          for (let i = 0; i < k; i++) {
+            let p;
+            do {
+              p = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) };
+            } while (occupied(p));
+            const dirs = [
+              [1, 0],
+              [-1, 0],
+              [0, 1],
+              [0, -1],
+            ];
+            const d = dirs[Math.floor(Math.random() * dirs.length)];
+            state.meteors.push({ x: p.x, y: p.y, dx: d[0], dy: d[1] });
+          }
+        }
+
+        function occupied(p) {
+          if (state.obstacles.has(posKey(p))) return true;
+          if (state.portal && p.x === state.portal.x && p.y === state.portal.y) return true;
+          for (const s of state.snake) if (s.x === p.x && s.y === p.y) return true;
+          for (const a of state.apples) if (a.x === p.x && a.y === p.y) return true;
+          for (const m of state.meteors) if (m.x === p.x && m.y === p.y) return true;
+          return false;
+        }
+
+        function start(levelIndex = 0) {
+          state = newState(levelIndex);
+          // walls
+          if (state.conf.walls && typeof state.conf.walls === 'string') addWalls(state.conf.walls);
+          // safe spawn after walls
+          setSafeSpawn();
+          // apples
+          for (let i = 0; i < state.conf.apples; i++) placeApple();
+          // meteors
+          spawnMeteors(state.conf.meteors || 0);
+          updateStats();
+          draw();
+        }
+
+        function headPos() {
+          return state.snake[0] || { x: Math.floor(N / 2), y: Math.floor(N / 2) };
+        }
+
+        function setSafeSpawn() {
+          const dirs = [
+            { x: 1, y: 0 },
+            { x: -1, y: 0 },
+            { x: 0, y: 1 },
+            { x: 0, y: -1 },
+          ];
+          for (let y = 1; y < N - 1; y++)
+            for (let x = 1; x < N - 1; x++) {
+              for (const d of dirs) {
+                if (isCorridor({ x, y }, d, 10)) {
+                  const snake = [];
+                  for (let i = 0; i < 8; i++) snake.push({ x: x - i * d.x, y: y - i * d.y });
+                  if (snake.every((p) => inBounds(p) && !state.obstacles.has(posKey(p)))) {
+                    state.snake = snake;
+                    state.dir = d;
+                    state.pendingDir = d;
+                    return;
+                  }
+                }
+              }
+            }
+          // fallback center
+          const cx = Math.floor(N / 2),
+            cy = Math.floor(N / 2);
+          const snake = [];
+          for (let i = 0; i < 8; i++) snake.push({ x: cx - i, y: cy });
+          state.snake = snake;
+          state.dir = { x: 1, y: 0 };
+          state.pendingDir = { x: 1, y: 0 };
+        }
+
+        function isCorridor(p, d, len) {
+          for (let i = 0; i < len; i++) {
+            const q = { x: p.x + i * d.x, y: p.y + i * d.y };
+            if (!inBounds(q) || state.obstacles.has(posKey(q))) return false;
+          }
+          return true;
+        }
+
+        function isReachable(from, to) {
+          const k = (p) => p.x + ',' + p.y;
+          const seen = new Set([k(from)]);
+          const q = [from];
+          while (q.length) {
+            const c = q.shift();
+            if (c.x === to.x && c.y === to.y) return true;
+            const ns = [
+              { x: c.x + 1, y: c.y },
+              { x: c.x - 1, y: c.y },
+              { x: c.x, y: c.y + 1 },
+              { x: c.x, y: c.y - 1 },
+            ];
+            for (const n of ns) {
+              if (inBounds(n) && !state.obstacles.has(posKey(n)) && !seen.has(k(n))) {
+                seen.add(k(n));
+                q.push(n);
+              }
+            }
+          }
+          return false;
+        }
+
+        function toggle() {
+          if (!state) start(0);
+          state.running = !state.running;
+        }
+
+        // Game loop
+        let last = 0;
+        const STEP = 1000 / 12; // base rendering fps
+        function loop(ts) {
+          requestAnimationFrame(loop);
+          if (!state) return;
+          const speed = state.conf.baseSpeed * state.speedMul; // higher -> faster
+          const interval = Math.max(30, 220 - speed * 120); // ms per step
+          if (!last) last = ts;
+          const delta = ts - last;
+          if (delta >= interval) {
+            last = ts;
+            if (state.running && !state.over && !state.victory) tick();
+            draw();
+          }
+        }
+        requestAnimationFrame(loop);
+
+        function tick() {
+          // move meteors
+          for (const m of state.meteors) {
+            m.x += m.dx;
+            m.y += m.dy;
+            if (m.x < 0 || m.y < 0 || m.x >= N || m.y >= N) {
+              m.x = (m.x + N) % N;
+              m.y = (m.y + N) % N;
+            }
+            // bounce on walls
+            if (state.obstacles.has(posKey(m))) {
+              m.x -= m.dx;
+              m.y -= m.dy;
+              m.dx *= -1;
+              m.dy *= -1;
+            }
+          }
+
+          // move snake
+          state.dir = state.pendingDir;
+          const head = { x: state.snake[0].x + state.dir.x, y: state.snake[0].y + state.dir.y };
+          if (!state.conf.wrap && !inBounds(head)) {
+            state.over = true;
+            beep(240, 0.08);
+            return;
+          }
+          head.x = (head.x + N) % N;
+          head.y = (head.y + N) % N;
+
+          // collisions
+          if (state.obstacles.has(posKey(head))) {
+            state.over = true;
+            beep(240, 0.08);
+            return;
+          }
+          for (const m of state.meteors) {
+            if (m.x === head.x && m.y === head.y) {
+              state.over = true;
+              beep(240, 0.08);
+              return;
+            }
+          }
+          for (let i = 0; i < state.snake.length; i++) {
+            const s = state.snake[i];
+            if (s.x === head.x && s.y === head.y) {
+              state.over = true;
+              beep(240, 0.08);
+              return;
+            }
+          }
+
+          // apples
+          let ate = false;
+          let tailToDrop = null;
+          for (let i = 0; i < state.apples.length; i++) {
+            const a = state.apples[i];
+            if (a.x === head.x && a.y === head.y) {
+              ate = true;
+              tailToDrop = state.snake[state.snake.length - 1];
+              state.apples.splice(i, 1);
+              break;
+            }
+          }
+
+          // advance body
+          state.snake.unshift(head);
+          if (ate) {
+            // drop tail as obstacle and speed up
+            if (state.snake.length > 1) {
+              state.snake.pop(); // remove last (we'll pop one more below to shrink)
+              const lastSeg = state.snake.pop();
+              if (lastSeg) state.obstacles.add(posKey(tailToDrop || lastSeg));
+            }
+            state.speedMul *= 1.4; // замедлили ускорение: было 2x, теперь 1.4x
+            placeApple();
+            burst(head.x, head.y, '#ef4444');
+            beep(660, 0.03);
+          } else {
+            state.snake.pop();
+          }
+
+          // portal
+          if (!state.portal && state.snake.length <= 2) placePortal();
+          if (state.portal && head.x === state.portal.x && head.y === state.portal.y) {
+            // next level or victory
+            if (state.levelIndex < levels.length - 1) {
+              start(state.levelIndex + 1);
+            } else {
+              state.victory = true;
+              state.running = false;
+              beep(880, 0.06);
+            }
+          }
+
+          updateStats();
+          // particles update
+          const nextP = [];
+          for (const p of state.particles) {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 1;
+            p.vx *= 0.98;
+            p.vy *= 0.98;
+            if (p.life > 0) nextP.push(p);
+          }
+          state.particles = nextP;
+        }
+
+        function draw() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          // background gradient
+          const grd = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+          grd.addColorStop(0, '#071426');
+          grd.addColorStop(1, '#0a0f1f');
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // subtle grid
+          ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+          ctx.lineWidth = 1;
+          for (let i = 0; i <= N; i++) {
+            ctx.beginPath();
+            ctx.moveTo(i * CELL, 0);
+            ctx.lineTo(i * CELL, canvas.height);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, i * CELL);
+            ctx.lineTo(canvas.width, i * CELL);
+            ctx.stroke();
+          }
+
+          // darkness mask
+          if (state.conf.darkness) {
+            ctx.save();
+            ctx.fillStyle = '#000000';
+            ctx.globalAlpha = 0.75;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalCompositeOperation = 'destination-out';
+            const head = state.snake[0];
+            ctx.beginPath();
+            ctx.arc((head.x + 0.5) * CELL, (head.y + 0.5) * CELL, CELL * 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // obstacles
+          ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--wall');
+          state.obstacles.forEach((k) => {
+            const [x, y] = k.split(',').map(Number);
+            roundRect(x, y, 0.9, 0.9, 6, '#3b4154');
+          });
+
+          // portal
+          if (state.portal) {
+            glowRect(
+              state.portal.x,
+              state.portal.y,
+              0.9,
+              0.9,
+              getComputedStyle(document.documentElement).getPropertyValue('--portal')
+            );
+          }
+
+          // meteors
+          ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--meteor');
+          for (const m of state.meteors) roundRect(m.x, m.y, 0.9, 0.9, 6, '#f59e0b');
+
+          // apples
+          for (const a of state.apples) apple(a.x, a.y);
+          // particles
+          for (const p of state.particles) {
+            const cxp = (p.x + 0.5) * CELL;
+            const cyp = (p.y + 0.5) * CELL;
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, Math.min(1, p.life / 20));
+            ctx.fillStyle = p.color;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(cxp, cyp, 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // snake
+          for (let i = state.snake.length - 1; i >= 0; i--) {
+            const s = state.snake[i];
+            const color =
+              i === 0
+                ? getComputedStyle(document.documentElement).getPropertyValue('--head')
+                : getComputedStyle(document.documentElement).getPropertyValue('--snake');
+            snakeSeg(s.x, s.y, color, i === 0);
+          }
+
+          // overlays
+          if (state.over || state.victory) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#e5e7eb';
+            ctx.textAlign = 'center';
+            ctx.font = 'bold 42px Inter, system-ui';
+            ctx.fillText(
+              state.victory ? 'ВСЕ УРОВНИ ПРОЙДЕНЫ!' : 'ПРОВАЛ!',
+              canvas.width / 2,
+              canvas.height / 2
+            );
+            ctx.font = '16px Inter, system-ui';
+            ctx.fillText('Нажмите R чтобы начать заново', canvas.width / 2, canvas.height / 2 + 30);
+          }
+        }
+
+        function rectRaw(x, y, w, h) {
+          ctx.fillRect(x, y, w, h);
+        }
+        function roundRect(x, y, w = 1, h = 1, r = 6, strokeColor = null) {
+          const pad = (1 - w) / 2;
+          const rx = (x + pad) * CELL,
+            ry = (y + pad) * CELL,
+            rw = w * CELL,
+            rh = h * CELL;
+          const rad = Math.min(r, rw * 0.3, rh * 0.3);
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(rx + rad, ry);
+          ctx.lineTo(rx + rw - rad, ry);
+          ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + rad);
+          ctx.lineTo(rx + rw, ry + rh - rad);
+          ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - rad, ry + rh);
+          ctx.lineTo(rx + rad, ry + rh);
+          ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - rad);
+          ctx.lineTo(rx, ry + rad);
+          ctx.quadraticCurveTo(rx, ry, rx + rad, ry);
+          ctx.closePath();
+          ctx.fill();
+          if (strokeColor) {
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        function glowRect(x, y, w, h, color) {
+          const pad = (1 - w) / 2;
+          const rx = (x + pad) * CELL,
+            ry = (y + pad) * CELL,
+            rw = w * CELL,
+            rh = h * CELL;
+          ctx.save();
+          ctx.fillStyle = color.trim();
+          ctx.shadowColor = color.trim();
+          ctx.shadowBlur = 18;
+          rectRaw(rx, ry, rw, rh);
+          ctx.restore();
+        }
+        function apple(x, y) {
+          const cx = (x + 0.5) * CELL,
+            cy = (y + 0.5) * CELL,
+            r = CELL * 0.35;
+          ctx.save();
+          const grd = ctx.createRadialGradient(cx, cy, 2, cx, cy, r);
+          grd.addColorStop(0, '#ffb4b4');
+          grd.addColorStop(1, '#ef4444');
+          ctx.fillStyle = grd;
+          ctx.shadowColor = '#ef4444';
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+        function burst(x, y, color = '#ef4444') {
+          for (let i = 0; i < 14; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const s = Math.random() * 0.6 + 0.3;
+            state.particles.push({
+              x,
+              y,
+              vx: Math.cos(a) * s,
+              vy: Math.sin(a) * s,
+              life: (24 + Math.random() * 8) | 0,
+              color,
+            });
+          }
+        }
+        function beep(freq, dur) {
+          if (!soundOn) return;
+          try {
+            if (!acx) acx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = acx.createOscillator();
+            const g = acx.createGain();
+            o.type = 'sine';
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0.001, acx.currentTime);
+            g.gain.linearRampToValueAtTime(0.03, acx.currentTime + 0.005);
+            g.gain.exponentialRampToValueAtTime(0.0001, acx.currentTime + dur);
+            o.connect(g).connect(acx.destination);
+            o.start();
+            o.stop(acx.currentTime + dur + 0.01);
+          } catch {
+            /* noop */
+          }
+        }
+        function snakeSeg(x, y, color, isHead) {
+          ctx.save();
+          ctx.fillStyle = color.trim();
+          ctx.shadowColor = color.trim();
+          ctx.shadowBlur = isHead ? 14 : 6;
+          roundRect(x, y, 0.9, 0.9, 8);
+          if (isHead) {
+            // eyes
+            const cx = (x + 0.5) * CELL,
+              cy = (y + 0.5) * CELL,
+              d = CELL * 0.18;
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.arc(cx - d, cy - d, 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cx + d, cy - d, 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        function updateStats() {
+          document.getElementById('statLevel').textContent = state.levelIndex + 1;
+          document.getElementById('statSpeed').textContent =
+            (state.conf.baseSpeed * state.speedMul).toFixed(1) + 'x';
+          document.getElementById('statLen').textContent = state.snake.length;
+          Array.from(lvlWrap.children).forEach((b, i) =>
+            b.classList.toggle('active', i === state.levelIndex)
+          );
+        }
+
+        document.getElementById('sound').onclick = () => {
+          soundOn = !soundOn;
+          document.getElementById('sound').textContent = 'Звук: ' + (soundOn ? 'вкл' : 'выкл');
+          try {
+            if (soundOn && !acx) acx = new (window.AudioContext || window.webkitAudioContext)();
+          } catch {
+            /* noop */
+          }
+        };
+
+        // init
+        start(0);
+      })();
+    </script>
   </body>
-  </html>
+</html>

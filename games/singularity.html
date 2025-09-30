@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Сингулярность — круговой арканоид</title>
+    <style>
+      :root {
+        --bg: #0a0e1a;
+        --ring: #0f172a;
+        --neon: #64ffda;
+        --neo2: #c77dff;
+        --text: #e6e6ff;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: radial-gradient(60% 60% at 50% 40%, #0b1020, #020617);
+        color: var(--text);
+        font-family: Inter, system-ui, Arial;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 12px;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+      canvas {
+        background: transparent;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        width: 100%;
+        height: auto;
+        max-width: 720px;
+        touch-action: none;
+      }
+      .panel {
+        width: 320px;
+        background: #0a0f1e;
+        border: 1px solid #0f172a;
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      @media (max-width: 768px) {
+        .panel {
+          width: 100%;
+        }
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .label {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .stat {
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <canvas id="cv" width="720" height="720"></canvas>
+      <aside class="panel">
+        <h1>Сингулярность</h1>
+        <div class="row">
+          <button id="play">Играть/Пауза</button>
+          <button id="restart">Заново</button>
+          <button id="sound">Звук: выкл</button>
+        </div>
+        <div class="row" style="gap: 12px">
+          <div>
+            <div class="label">Уровень</div>
+            <div class="stat" id="lv">1</div>
+          </div>
+          <div>
+            <div class="label">Очки</div>
+            <div class="stat" id="sc">0</div>
+          </div>
+          <div>
+            <div class="label">Шары</div>
+            <div class="stat" id="bs">0</div>
+          </div>
+        </div>
+        <p class="label">
+          Правила: Платформа движется по окружности, отражает шар. Ломайте неоновые блоки. Бонусы
+          притягиваются к стенке (гравитация от центра наружу). Проигрыш — когда шаров не осталось.
+        </p>
+      </aside>
+    </div>
+    <script>
+      (function () {
+        const cv = document.getElementById('cv');
+        const cx = cv.getContext('2d');
+        const W = cv.width,
+          H = cv.height;
+        const C = { x: W / 2, y: H / 2 };
+        const R = Math.min(W, H) * 0.42; // внутренняя игровая окружность
+        let state;
+        let soundOn = false;
+        let acx = null;
+
+        const levels = [
+          { rings: 1, sectors: 10, ballSpeed: 3, paddle: 0.9, bonusRate: 0.2 },
+          { rings: 2, sectors: 12, ballSpeed: 3.2, paddle: 0.85, bonusRate: 0.22 },
+          { rings: 2, sectors: 14, ballSpeed: 3.5, paddle: 0.8, bonusRate: 0.24 },
+          { rings: 3, sectors: 14, ballSpeed: 3.8, paddle: 0.78, bonusRate: 0.26 },
+          { rings: 3, sectors: 16, ballSpeed: 4.1, paddle: 0.76, bonusRate: 0.28 },
+        ];
+
+        function newState(i) {
+          const L = levels[i];
+          const s = {
+            level: i,
+            running: true,
+            score: 0,
+            paddle: { ang: -Math.PI / 2, size: Math.PI * 0.18 * L.paddle },
+            balls: [],
+            bricks: [],
+            bonuses: [],
+            particles: [],
+            slowTimer: 0,
+            shield: 0,
+            stickyTimer: 0,
+            aimTimer: 0,
+            hasteTimer: 0,
+          };
+          // bricks: rings from R-40 inward
+          const ringW = 18;
+          for (let r = 0; r < L.rings; r++) {
+            const rad = R - 40 - r * (ringW + 8);
+            for (let k = 0; k < L.sectors; k++) {
+              const a0 = (k * 2 * Math.PI) / L.sectors;
+              const a1 = ((k + 1) * 2 * Math.PI) / L.sectors;
+              // pattern gaps on outer ring for variety
+              if (i % 2 === 1 && r === 0 && k % 5 === 0) continue;
+              s.bricks.push({ rad, r1: rad - ringW, a0, a1, hp: 1 });
+            }
+          }
+          // spawn one ball
+          s.balls.push({ x: C.x, y: C.y - R * 0.6, vx: 0, vy: L.ballSpeed });
+          return s;
+        }
+
+        function start(i = 0) {
+          state = newState(i);
+          updateHUD();
+          draw();
+        }
+        document.getElementById('restart').onclick = () => start(state ? state.level : 0);
+        document.getElementById('play').onclick = () => {
+          state.running = !state.running;
+        };
+        document.getElementById('sound').onclick = () => {
+          soundOn = !soundOn;
+          if (soundOn && !acx) {
+            try {
+              acx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+              // ignore
+            }
+          }
+          document.getElementById('sound').textContent = 'Звук: ' + (soundOn ? 'вкл' : 'выкл');
+        };
+
+        // touch/pointer control: drag around the circle to set paddle angle
+        let dragging = false;
+        cv.addEventListener(
+          'pointerdown',
+          (e) => {
+            dragging = true;
+            cv.setPointerCapture(e.pointerId);
+            updateAngle(e);
+            e.preventDefault();
+          },
+          { passive: false }
+        );
+        cv.addEventListener(
+          'pointermove',
+          (e) => {
+            if (!dragging) return;
+            updateAngle(e);
+            e.preventDefault();
+          },
+          { passive: false }
+        );
+        cv.addEventListener(
+          'pointerup',
+          (e) => {
+            dragging = false;
+            cv.releasePointerCapture(e.pointerId);
+            e.preventDefault();
+          },
+          { passive: false }
+        );
+        function updateAngle(e) {
+          const r = cv.getBoundingClientRect();
+          const x = e.clientX - r.left;
+          const y = e.clientY - r.top;
+          const a = Math.atan2(y - r.height / 2, x - r.width / 2);
+          state.paddle.ang = a;
+        }
+
+        // controls: A/D or arrows to rotate paddle
+        window.addEventListener('keydown', (e) => {
+          const sp = 0.12;
+          if (!state) return;
+          if (e.key === 'a' || e.key === 'ArrowLeft') state.paddle.ang -= sp;
+          if (e.key === 'd' || e.key === 'ArrowRight') state.paddle.ang += sp;
+        });
+
+        function update() {
+          if (!state.running) return;
+          // balls physics
+          const nextBalls = [];
+          const speedScale =
+            (state.slowTimer > 0 ? 0.7 : 1.0) * (state.hasteTimer > 0 ? 1.35 : 1.0);
+          for (const b of state.balls) {
+            if (b.stuck) {
+              // follow paddle
+              const n = { x: Math.cos(state.paddle.ang), y: Math.sin(state.paddle.ang) };
+              b.x = C.x + n.x * (R - 8);
+              b.y = C.y + n.y * (R - 8);
+              b.stuckTime = (b.stuckTime || 0) + 1;
+              if (b.stuckTime > 40) {
+                // auto release outward
+                b.stuck = false;
+                b.stuckTime = 0;
+                const spd = levels[state.level].ballSpeed * 1.05;
+                b.vx = n.x * spd;
+                b.vy = n.y * spd;
+              }
+              nextBalls.push(b);
+              continue;
+            }
+            // move
+            b.x += b.vx * speedScale;
+            b.y += b.vy * speedScale;
+            const dx = b.x - C.x,
+              dy = b.y - C.y;
+            const dist = Math.hypot(dx, dy);
+            const ang = Math.atan2(dy, dx);
+            // collide with boundary circle
+            if (dist >= R - 6) {
+              // check paddle
+              const pa0 = normalize(state.paddle.ang - state.paddle.size / 2);
+              const pa1 = normalize(state.paddle.ang + state.paddle.size / 2);
+              let hit = false;
+              if (pa0 < pa1) hit = ang >= pa0 && ang <= pa1;
+              else hit = ang >= pa0 || ang <= pa1;
+              if (hit) {
+                // reflect
+                const n = { x: dx / dist, y: dy / dist };
+                const v = { x: b.vx, y: b.vy };
+                const dot = v.x * n.x + v.y * n.y;
+                v.x -= 2 * dot * n.x;
+                v.y -= 2 * dot * n.y;
+                // add spin based on where hit
+                const rel = shortestAngle(ang, state.paddle.ang) / (state.paddle.size / 2);
+                const tangent = { x: -n.y, y: n.x };
+                v.x += tangent.x * 2 * rel;
+                v.y += tangent.y * 2 * rel;
+                // clamp speed
+                const spd = Math.hypot(v.x, v.y);
+                const tgt = levels[state.level].ballSpeed * 1.05;
+                let nvx = (v.x / spd) * tgt;
+                let nvy = (v.y / spd) * tgt;
+                // sticky
+                if (state.stickyTimer > 0) {
+                  b.stuck = true;
+                  b.stuckTime = 0;
+                  emitHitParticles(ang);
+                  beep(520, 0.03);
+                  nextBalls.push(b);
+                  continue;
+                }
+                // auto aim toward nearest brick
+                if (state.aimTimer > 0) {
+                  const target = nearestBrickPoint();
+                  if (target) {
+                    const vx = target.x - b.x;
+                    const vy = target.y - b.y;
+                    const len = Math.hypot(vx, vy) || 1;
+                    nvx = (vx / len) * tgt;
+                    nvy = (vy / len) * tgt;
+                  }
+                }
+                b.vx = nvx;
+                b.vy = nvy;
+                // back off slightly
+                b.x = C.x + n.x * (R - 8);
+                b.y = C.y + n.y * (R - 8);
+                emitHitParticles(ang);
+                beep(660, 0.03);
+              } else {
+                // no paddle: consume shield if any
+                if (state.shield > 0) {
+                  state.shield--;
+                  const n = { x: dx / dist, y: dy / dist };
+                  const v = { x: b.vx, y: b.vy };
+                  const dot = v.x * n.x + v.y * n.y;
+                  v.x -= 2 * dot * n.x;
+                  v.y -= 2 * dot * n.y;
+                  const spd = Math.hypot(v.x, v.y);
+                  const tgt = levels[state.level].ballSpeed;
+                  b.vx = (v.x / spd) * tgt;
+                  b.vy = (v.y / spd) * tgt;
+                  b.x = C.x + n.x * (R - 8);
+                  b.y = C.y + n.y * (R - 8);
+                } else {
+                  // lost ball
+                  continue;
+                }
+              }
+            }
+
+            // collide with bricks (polar sectors)
+            for (const br of state.bricks) {
+              if (br.hp <= 0) continue;
+              const r = Math.hypot(b.x - C.x, b.y - C.y);
+              const a = normalize(Math.atan2(b.y - C.y, b.x - C.x));
+              if (r <= br.rad && r >= br.r1 && angleIn(a, br.a0, br.a1)) {
+                br.hp = 0;
+                state.score += 10;
+                maybeBonus(b.x, b.y);
+                // reflect approximately by radial normal
+                const n = { x: (b.x - C.x) / r, y: (b.y - C.y) / r };
+                const v = { x: b.vx, y: b.vy };
+                const dot = v.x * n.x + v.y * n.y;
+                v.x -= 2 * dot * n.x;
+                v.y -= 2 * dot * n.y;
+                b.vx = v.x;
+                b.vy = v.y;
+                emitBrickParticles(b.x, b.y);
+                beep(440, 0.04);
+              }
+            }
+
+            nextBalls.push(b);
+          }
+          state.balls = nextBalls;
+
+          // bonuses move outward due to radial gravity
+          const grav = 0.06;
+          for (const p of state.bonuses) {
+            const dx = p.x - C.x,
+              dy = p.y - C.y;
+            const r = Math.hypot(dx, dy);
+            const ux = dx / (r || 1),
+              uy = dy / (r || 1);
+            p.vx += ux * grav;
+            p.vy += uy * grav;
+            p.x += p.vx;
+            p.y += p.vy;
+            // collect by paddle at boundary
+            if (r >= R - 10) {
+              if (p.type === 'multi') splitBall();
+              else if (p.type === 'wide') widenPaddle();
+              else if (p.type === 'slow')
+                state.slowTimer = 600; // ~10s
+              else if (p.type === 'shield') state.shield = Math.min(state.shield + 1, 3);
+              else if (p.type === 'sticky') state.stickyTimer = 600;
+              else if (p.type === 'aim') state.aimTimer = 600;
+              else if (p.type === 'haste') state.hasteTimer = 600;
+              else if (p.type === 'breaker') destroyRing();
+              p.collected = true;
+              beep(720, 0.02);
+            }
+          }
+          state.bonuses = state.bonuses.filter(
+            (b) => !b.collected && Math.hypot(b.x - C.x, b.y - C.y) <= R + 20
+          );
+
+          // particles
+          const nextP = [];
+          for (const pt of state.particles) {
+            pt.x += pt.vx;
+            pt.y += pt.vy;
+            pt.life -= 1;
+            pt.vx *= 0.98;
+            pt.vy *= 0.98;
+            if (pt.life > 0) nextP.push(pt);
+          }
+          state.particles = nextP;
+
+          if (state.slowTimer > 0) state.slowTimer--;
+          if (state.stickyTimer > 0) state.stickyTimer--;
+          if (state.aimTimer > 0) state.aimTimer--;
+          if (state.hasteTimer > 0) state.hasteTimer--;
+
+          // next level if no bricks
+          if (state.bricks.every((b) => b.hp <= 0)) {
+            if (state.level < levels.length - 1) {
+              state.level++;
+              const keepScore = state.score;
+              state = newState(state.level);
+              state.score = keepScore;
+            } else {
+              state.running = false;
+            }
+          }
+
+          if (state.balls.length === 0) {
+            state.running = false;
+          }
+          updateHUD();
+        }
+
+        function splitBall() {
+          if (state.balls.length === 0) return;
+          const b = state.balls[0];
+          const v1 = rot(b.vx, b.vy, 0.25),
+            v2 = rot(b.vx, b.vy, -0.25);
+          state.balls.push({ x: b.x, y: b.y, vx: v1.x, vy: v1.y });
+          state.balls.push({ x: b.x, y: b.y, vx: v2.x, vy: v2.y });
+        }
+        function widenPaddle() {
+          state.paddle.size = Math.min(state.paddle.size * 1.2, Math.PI * 0.35);
+        }
+        function maybeBonus(x, y) {
+          if (Math.random() < levels[state.level].bonusRate) {
+            const roll = Math.random();
+            let type = 'multi';
+            if (roll < 0.2) type = 'multi';
+            else if (roll < 0.4) type = 'wide';
+            else if (roll < 0.55) type = 'slow';
+            else if (roll < 0.7) type = 'shield';
+            else if (roll < 0.82) type = 'sticky';
+            else if (roll < 0.92) type = 'aim';
+            else if (roll < 0.98) type = 'haste';
+            else type = 'breaker';
+            state.bonuses.push({ x, y, vx: 0, vy: 0, type });
+          }
+        }
+
+        function nearestBrickPoint() {
+          let best = null;
+          let bestD = 1e9;
+          for (const br of state.bricks) {
+            if (br.hp <= 0) continue;
+            // brick center in polar
+            const a = (br.a0 + br.a1) / 2;
+            const r = (br.rad + br.r1) / 2;
+            const x = C.x + Math.cos(a) * r;
+            const y = C.y + Math.sin(a) * r;
+            for (const b of state.balls) {
+              const d = Math.hypot(x - b.x, y - b.y);
+              if (d < bestD) {
+                bestD = d;
+                best = { x, y };
+              }
+            }
+          }
+          return best;
+        }
+
+        function destroyRing() {
+          // find outermost ring with hp>0 (largest rad)
+          let targetRad = -1;
+          for (const br of state.bricks) if (br.hp > 0) targetRad = Math.max(targetRad, br.rad);
+          if (targetRad < 0) return;
+          for (const br of state.bricks) {
+            if (br.hp > 0 && Math.abs(br.rad - targetRad) < 1e-6) {
+              br.hp = 0;
+              state.score += 10;
+              // emit particles along arc
+              const a = (br.a0 + br.a1) / 2;
+              const x = C.x + Math.cos(a) * br.rad;
+              const y = C.y + Math.sin(a) * br.rad;
+              emitBrickParticles(x, y);
+            }
+          }
+          beep(300, 0.08);
+        }
+
+        function emitBrickParticles(x, y) {
+          for (let i = 0; i < 14; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const s = 1 + Math.random() * 2.5;
+            state.particles.push({
+              x,
+              y,
+              vx: Math.cos(a) * s,
+              vy: Math.sin(a) * s,
+              life: (30 + Math.random() * 10) | 0,
+              color: Math.random() < 0.5 ? '#64ffda' : '#c77dff',
+            });
+          }
+        }
+        function emitHitParticles(angle) {
+          const x = C.x + Math.cos(angle) * (R - 6);
+          const y = C.y + Math.sin(angle) * (R - 6);
+          for (let i = 0; i < 10; i++) {
+            const a = angle + (Math.random() - 0.5) * 0.8;
+            const s = 1 + Math.random() * 2;
+            state.particles.push({
+              x,
+              y,
+              vx: Math.cos(a) * s,
+              vy: Math.sin(a) * s,
+              life: (20 + Math.random() * 8) | 0,
+              color: '#e5e7eb',
+            });
+          }
+        }
+        function beep(freq, dur) {
+          if (!soundOn || !acx) return;
+          try {
+            const o = acx.createOscillator();
+            const g = acx.createGain();
+            o.type = 'sine';
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0.001, acx.currentTime);
+            g.gain.linearRampToValueAtTime(0.03, acx.currentTime + 0.005);
+            g.gain.exponentialRampToValueAtTime(0.0001, acx.currentTime + dur);
+            o.connect(g).connect(acx.destination);
+            o.start();
+            o.stop(acx.currentTime + dur + 0.01);
+          } catch (e) {
+            /* noop */
+          }
+        }
+
+        function angleIn(a, a0, a1) {
+          a = normalize(a);
+          a0 = normalize(a0);
+          a1 = normalize(a1);
+          if (a0 < a1) return a >= a0 && a <= a1;
+          return a >= a0 || a <= a1;
+        }
+        function normalize(a) {
+          a %= 2 * Math.PI;
+          if (a < 0) a += 2 * Math.PI;
+          return a;
+        }
+        function shortestAngle(a, b) {
+          let d = normalize(a) - normalize(b);
+          if (d > Math.PI) d -= 2 * Math.PI;
+          if (d < -Math.PI) d += 2 * Math.PI;
+          return d;
+        }
+        function rot(x, y, ang) {
+          const c = Math.cos(ang),
+            s = Math.sin(ang);
+          return { x: x * c - y * s, y: x * s + y * c };
+        }
+
+        function draw() {
+          cx.clearRect(0, 0, W, H);
+          // outer glow ring
+          cx.save();
+          const grad = cx.createRadialGradient(C.x, C.y, R - 40, C.x, C.y, R + 30);
+          grad.addColorStop(0, 'rgba(100,255,218,0.08)');
+          grad.addColorStop(1, 'rgba(199,125,255,0.12)');
+          cx.fillStyle = grad;
+          cx.beginPath();
+          cx.arc(C.x, C.y, R + 30, 0, Math.PI * 2);
+          cx.fill();
+          cx.restore();
+
+          // boundary circle
+          cx.lineWidth = 6;
+          cx.strokeStyle = '#1f2937';
+          cx.beginPath();
+          cx.arc(C.x, C.y, R, 0, Math.PI * 2);
+          cx.stroke();
+
+          // paddle arc
+          cx.save();
+          cx.strokeStyle =
+            '' + getComputedStyle(document.documentElement).getPropertyValue('--accent');
+          cx.shadowColor = '#64ffda';
+          cx.shadowBlur = 12;
+          cx.lineWidth = 10;
+          cx.lineCap = 'round';
+          cx.beginPath();
+          cx.arc(
+            C.x,
+            C.y,
+            R - 4,
+            state.paddle.ang - state.paddle.size / 2,
+            state.paddle.ang + state.paddle.size / 2
+          );
+          cx.stroke();
+          cx.restore();
+
+          // bricks
+          for (const br of state.bricks) {
+            if (br.hp <= 0) continue;
+            sector(br.r1, br.rad, br.a0, br.a1, '#0f172a', '#64ffda');
+          }
+
+          // bonuses
+          for (const p of state.bonuses) {
+            cx.save();
+            cx.fillStyle =
+              p.type === 'multi'
+                ? '#c77dff'
+                : p.type === 'wide'
+                  ? '#64ffda'
+                  : p.type === 'slow'
+                    ? '#22d3ee'
+                    : p.type === 'shield'
+                      ? '#f59e0b'
+                      : p.type === 'sticky'
+                        ? '#38bdf8'
+                        : p.type === 'aim'
+                          ? '#84cc16'
+                          : p.type === 'haste'
+                            ? '#ef4444'
+                            : '#eab308';
+            cx.shadowColor = cx.fillStyle;
+            cx.shadowBlur = 12;
+            cx.beginPath();
+            cx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
+          }
+
+          // balls
+          for (const b of state.balls) {
+            cx.save();
+            cx.fillStyle = '#e5e7eb';
+            cx.shadowColor = '#e5e7eb';
+            cx.shadowBlur = 10;
+            cx.beginPath();
+            cx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
+          }
+
+          // particles draw
+          for (const pt of state.particles) {
+            cx.save();
+            cx.globalAlpha = Math.max(0, Math.min(1, pt.life / 30));
+            cx.fillStyle = pt.color;
+            cx.shadowColor = pt.color;
+            cx.shadowBlur = 10;
+            cx.beginPath();
+            cx.arc(pt.x, pt.y, 2.2, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
+          }
+        }
+
+        function sector(r0, r1, a0, a1, fill, stroke) {
+          cx.save();
+          cx.beginPath();
+          cx.arc(C.x, C.y, r1, a0, a1);
+          cx.arc(C.x, C.y, r0, a1, a0, true);
+          cx.closePath();
+          cx.fillStyle = fill;
+          cx.fill();
+          cx.lineWidth = 2;
+          cx.strokeStyle = stroke;
+          cx.stroke();
+          cx.restore();
+        }
+
+        function tick() {
+          update();
+          draw();
+          requestAnimationFrame(tick);
+        }
+        function updateHUD() {
+          document.getElementById('lv').textContent = state.level + 1;
+          document.getElementById('sc').textContent = state.score;
+          document.getElementById('bs').textContent = state.balls.length;
+        }
+
+        start(0);
+        requestAnimationFrame(tick);
+      })();
+    </script>
+  </body>
+</html>
