@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Дуэль — Отзеркаленные шары</title>
+    <style>
+      :root {
+        --bg: #070d1a;
+        --card: #0a0f1e;
+        --line: #0f172a;
+        --green: #16a34a;
+        --yellow: #eab308;
+        --proj1: #34d399;
+        --proj2: #f59e0b;
+        --text: #e5e7eb;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: radial-gradient(80% 80% at 50% 20%, #0b1020, #020617);
+        color: var(--text);
+        font-family: Inter, system-ui, Arial;
+      }
+      .wrap {
+        height: 100dvh;
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 12px;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+      canvas {
+        width: 100%;
+        height: auto;
+        max-height: calc(100dvh - 24px);
+        background: #0b1020;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        touch-action: none;
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: 0;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .badge {
+        display: inline-block;
+        background: #0b1220;
+        border: 1px solid #111827;
+        border-radius: 8px;
+        padding: 6px 8px;
+      }
+
+      @media (max-width: 900px) {
+        .wrap {
+          grid-template-columns: 1fr;
+        }
+        canvas {
+          max-width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <canvas id="cv" width="900" height="540"></canvas>
+      <aside class="panel">
+        <h2 style="margin: 0 0 6px 0">Дуэль</h2>
+        <div class="row">
+          <button id="mode1">1 игрок</button>
+          <button id="mode2">2 игрока</button>
+          <button id="restart">Заново</button>
+        </div>
+        <div class="row">
+          <span class="badge" id="info">Режим: 1 игрок, уровень 1</span>
+        </div>
+        <div class="row">
+          <button id="level1">Уровень 1</button>
+          <button id="level2">2</button>
+          <button id="level3">3</button>
+          <button id="level4">4</button>
+          <button id="level5">5</button>
+        </div>
+        <div class="row">
+          <button id="sound">Звук: выкл</button>
+        </div>
+        <p class="badge">
+          Подсказка: нажмите/тапните по своей половине, чтобы выстрелить. После 3 выстрелов идёт
+          перезарядка 2 сек.
+        </p>
+      </aside>
+    </div>
+    <script>
+      (function () {
+        const cv = document.getElementById('cv');
+        const cx = cv.getContext('2d');
+        const W = cv.width,
+          H = cv.height;
+        const HALF = W / 2;
+        let soundOn = false,
+          acx = null;
+
+        const MODE = { SOLO: 'solo', VS: 'vs' };
+        let mode = MODE.SOLO;
+        let level = 1;
+        let state;
+
+        function clamp(v, a, b) {
+          return Math.max(a, Math.min(b, v));
+        }
+        function rand(a, b) {
+          return a + Math.random() * (b - a);
+        }
+
+        function init() {
+          state = {
+            over: false,
+            msg: '',
+            t: 0,
+            p1: mkPlayer('left'),
+            p2: mkPlayer('right', mode === MODE.SOLO ? 2 + level : 3),
+            projs: [],
+            pickups: [],
+          };
+          // more enemy HP per level in solo
+          if (mode === MODE.SOLO) state.p2.hp = 3 + (level - 1);
+          spawnPickups();
+          updateHUD();
+        }
+
+        function mkPlayer(side, hp = 3) {
+          const x = side === 'left' ? HALF * 0.25 : HALF + HALF * 0.75;
+          const y = H * 0.5;
+          return {
+            side,
+            x,
+            y,
+            r: 16,
+            vy: side === 'left' ? 180 : -180, // px/s initial directions
+            hp,
+            maxHp: Math.max(3, hp),
+            shield: 0,
+            ammo: 3,
+            reload: 0,
+            rapidTimer: 0,
+          };
+        }
+
+        function spawnPickups() {
+          state.pickups.length = 0;
+          const count = mode === MODE.SOLO ? 3 : 2;
+          for (let i = 0; i < count; i++) {
+            const type = Math.random() < 0.4 ? 'hp' : Math.random() < 0.7 ? 'shield' : 'rapid';
+            const x = i % 2 === 0 ? rand(40, HALF - 40) : rand(HALF + 40, W - 40);
+            const y = rand(60, H - 60);
+            state.pickups.push({ type, x, y, r: 10 });
+          }
+        }
+
+        cv.addEventListener(
+          'pointerdown',
+          (e) => {
+            if (state.over) return;
+            const rect = cv.getBoundingClientRect();
+            const x = e.clientX - rect.left,
+              y = e.clientY - rect.top;
+            if (x < HALF) shoot(state.p1, x, y);
+            else if (mode === MODE.VS) shoot(state.p2, x, y);
+          },
+          { passive: true }
+        );
+
+        function shoot(p, tx, ty) {
+          if (p.reload > 0 || p.ammo <= 0) return;
+          const vx = tx - p.x,
+            vy = ty - p.y;
+          const len = Math.hypot(vx, vy) || 1;
+          const spd = 500; // px/s
+          state.projs.push({
+            x: p.x,
+            y: p.y,
+            vx: (vx / len) * spd,
+            vy: (vy / len) * spd,
+            from: p.side,
+          });
+          p.vy *= -1; // reverse direction
+          p.ammo -= 1;
+          if (p.ammo === 0) p.reload = p.rapidTimer > 0 ? 1000 : 2000; // ms
+          beep(p.side === 'left' ? 560 : 620, 0.03);
+        }
+
+        function aiThink(dt) {
+          if (mode !== MODE.SOLO || state.over) return;
+          const ai = state.p2,
+            me = state.p1;
+          // shoot with high accuracy periodically
+          ai.aiShotT = (ai.aiShotT || 0) - dt;
+          if (ai.aiShotT <= 0 && ai.ammo > 0 && ai.reload <= 0) {
+            // lead a bit
+            const leadY = me.y + me.vy * 0.2;
+            shoot(ai, me.x, clamp(leadY, 20, H - 20));
+            ai.aiShotT = 600 - Math.min(400, level * 60); // faster at higher levels
+          }
+          // dodge incoming projectiles (small horizontal wobble permitted)
+          const threat = state.projs.find(
+            (pr) => pr.from !== ai.side && Math.abs(pr.x - ai.x) < 140
+          );
+          if (threat) {
+            ai.dodge = (ai.dodge || 0) + dt;
+            const phase = Math.sin(ai.dodge * 0.012);
+            ai.x = clamp(HALF + HALF * 0.75 + phase * 18, HALF + 60, W - 60);
+          } else {
+            // return to lane center
+            ai.x += (HALF + HALF * 0.75 - ai.x) * 0.02;
+          }
+          // pick closest pickup on his side
+          let best = null,
+            bestD = 1e9;
+          for (const pk of state.pickups) {
+            if (pk.x > HALF) {
+              const d = Math.hypot(pk.x - ai.x, pk.y - ai.y);
+              if (d < bestD) {
+                bestD = d;
+                best = pk;
+              }
+            }
+          }
+          if (best && bestD < 180) {
+            ai.y += (Math.sign(best.y - ai.y) * 140 * dt) / 1000;
+          }
+        }
+
+        function step(ts) {
+          if (!state) {
+            init();
+            last = ts;
+          }
+          const dt = Math.min(40, ts - (last || ts));
+          last = ts;
+          update(dt);
+          draw();
+          requestAnimationFrame(step);
+        }
+        let last = 0;
+
+        function update(dt) {
+          state.t += dt;
+          for (const p of [state.p1, state.p2]) {
+            // movement (vertical only)
+            p.y += (p.vy * dt) / 1000;
+            const top = 20,
+              bot = H - 20;
+            if (p.y < top) {
+              p.y = top;
+              p.vy *= -1;
+            }
+            if (p.y > bot) {
+              p.y = bot;
+              p.vy *= -1;
+            }
+            // timers
+            if (p.reload > 0) {
+              p.reload -= dt;
+              if (p.reload <= 0) {
+                p.reload = 0;
+                p.ammo = 3;
+                beep(420, 0.03);
+              }
+            }
+            if (p.rapidTimer > 0) p.rapidTimer -= dt;
+          }
+
+          // AI
+          aiThink(dt);
+
+          // projectiles
+          const nextProjs = [];
+          for (const pr of state.projs) {
+            pr.x += (pr.vx * dt) / 1000;
+            pr.y += (pr.vy * dt) / 1000;
+            if (pr.x < -20 || pr.x > W + 20 || pr.y < -20 || pr.y > H + 20) continue;
+            // collisions
+            const tgt = pr.from === 'left' ? state.p2 : state.p1;
+            const d = Math.hypot(pr.x - tgt.x, pr.y - tgt.y);
+            if (d <= tgt.r + 4) {
+              if (tgt.shield > 0) {
+                tgt.shield--;
+                burst(pr.x, pr.y, pr.from === 'left' ? '#34d399' : '#f59e0b');
+                beep(280, 0.03);
+              } else {
+                tgt.hp--;
+                burst(pr.x, pr.y, '#ef4444');
+                beep(300, 0.05);
+                if (tgt.hp <= 0)
+                  end(
+                    pr.from === 'left'
+                      ? 'Вы победили!'
+                      : mode === MODE.SOLO
+                        ? 'Вы проиграли.'
+                        : 'Игрок ' + (pr.from === 'left' ? 1 : 2) + ' победил!'
+                  );
+              }
+              continue;
+            }
+            nextProjs.push(pr);
+          }
+          state.projs = nextProjs;
+
+          // pickups
+          const nextPk = [];
+          for (const pk of state.pickups) {
+            const touch1 = Math.hypot(pk.x - state.p1.x, pk.y - state.p1.y) <= state.p1.r + pk.r;
+            const touch2 = Math.hypot(pk.x - state.p2.x, pk.y - state.p2.y) <= state.p2.r + pk.r;
+            if (touch1) applyPickup(state.p1, pk);
+            else if (touch2) applyPickup(state.p2, pk);
+            else nextPk.push(pk);
+          }
+          state.pickups = nextPk;
+          if (state.pickups.length === 0 && state.t % 3000 < 40) spawnPickups();
+        }
+
+        function applyPickup(p, pk) {
+          if (pk.type === 'hp') p.hp = Math.min(p.maxHp, p.hp + 1);
+          if (pk.type === 'shield') p.shield = Math.min(2, p.shield + 1);
+          if (pk.type === 'rapid') p.rapidTimer = 4000;
+          beep(720, 0.02);
+        }
+
+        function end(msg) {
+          state.over = true;
+          state.msg = msg;
+        }
+
+        function draw() {
+          cx.clearRect(0, 0, W, H);
+          // split background
+          cx.fillStyle = 'rgba(22,163,74,0.12)';
+          cx.fillRect(0, 0, HALF, H);
+          cx.fillStyle = 'rgba(234,179,8,0.12)';
+          cx.fillRect(HALF, 0, HALF, H);
+          // center line
+          cx.strokeStyle = '#1f2937';
+          cx.lineWidth = 2;
+          cx.beginPath();
+          cx.moveTo(HALF, 0);
+          cx.lineTo(HALF, H);
+          cx.stroke();
+
+          // players
+          drawPlayer(state.p1, 'var(--green)');
+          drawPlayer(state.p2, 'var(--yellow)');
+
+          // projectiles
+          for (const pr of state.projs) {
+            cx.save();
+            cx.fillStyle = pr.from === 'left' ? 'var(--proj1)' : 'var(--proj2)';
+            cx.shadowColor = cx.fillStyle;
+            cx.shadowBlur = 10;
+            cx.beginPath();
+            cx.arc(pr.x, pr.y, 4, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
+          }
+
+          // pickups
+          for (const pk of state.pickups) {
+            cx.save();
+            cx.lineWidth = 3;
+            if (pk.type === 'hp') cx.strokeStyle = '#22c55e';
+            else if (pk.type === 'shield') cx.strokeStyle = '#38bdf8';
+            else cx.strokeStyle = '#f59e0b';
+            cx.shadowColor = cx.strokeStyle;
+            cx.shadowBlur = 12;
+            cx.beginPath();
+            cx.arc(pk.x, pk.y, pk.r, 0, Math.PI * 2);
+            cx.stroke();
+            cx.restore();
+          }
+
+          // overlay / UI
+          drawHUD(state.p1, 20, 20, 'Игрок 1');
+          drawHUD(state.p2, W - 220, 20, mode === MODE.SOLO ? 'ИИ' : 'Игрок 2');
+          if (state.over) {
+            cx.fillStyle = 'rgba(0,0,0,0.6)';
+            cx.fillRect(0, 0, W, H);
+            cx.fillStyle = '#e5e7eb';
+            cx.textAlign = 'center';
+            cx.font = 'bold 38px Inter, system-ui';
+            cx.fillText(state.msg, W / 2, H / 2);
+          }
+        }
+
+        function drawPlayer(p, color) {
+          cx.save();
+          cx.fillStyle =
+            getComputedStyle(document.documentElement)
+              .getPropertyValue(color.replace('var(', '').replace(')', ''))
+              .trim() || color;
+          cx.shadowColor = cx.fillStyle;
+          cx.shadowBlur = 14;
+          cx.beginPath();
+          cx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          cx.fill();
+          // shield ring
+          if (p.shield > 0) {
+            cx.strokeStyle = '#38bdf8';
+            cx.lineWidth = 3;
+            cx.beginPath();
+            cx.arc(p.x, p.y, p.r + 5, 0, Math.PI * 2);
+            cx.stroke();
+          }
+          cx.restore();
+        }
+
+        function drawHUD(p, x, y, label) {
+          cx.save();
+          cx.font = 'bold 14px Inter, system-ui';
+          cx.fillStyle = '#e5e7eb';
+          cx.fillText(label, x, y);
+          // HP
+          for (let i = 0; i < p.maxHp; i++) {
+            cx.fillStyle = i < p.hp ? '#ef4444' : '#334155';
+            cx.fillRect(x + i * 18, y + 10, 14, 10);
+          }
+          // ammo
+          cx.fillStyle = '#94a3b8';
+          cx.fillText('Боезапас: ' + p.ammo + (p.reload > 0 ? ' (перезарядка)' : ''), x, y + 36);
+          cx.restore();
+        }
+
+        function burst(x, y, color) {
+          // simple particles
+          cx.save();
+          cx.fillStyle = color;
+          cx.shadowColor = color;
+          cx.shadowBlur = 12;
+          for (let i = 0; i < 8; i++) {
+            const a = Math.random() * Math.PI * 2,
+              r = 2 + Math.random() * 2;
+            cx.beginPath();
+            cx.arc(x + Math.cos(a) * 8, y + Math.sin(a) * 8, r, 0, Math.PI * 2);
+            cx.fill();
+          }
+          cx.restore();
+        }
+
+        function beep(freq, dur) {
+          if (!soundOn) return;
+          try {
+            if (!acx) acx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = acx.createOscillator();
+            const g = acx.createGain();
+            o.type = 'sine';
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0.001, acx.currentTime);
+            g.gain.linearRampToValueAtTime(0.03, acx.currentTime + 0.005);
+            g.gain.exponentialRampToValueAtTime(0.0001, acx.currentTime + dur);
+            o.connect(g).connect(acx.destination);
+            o.start();
+            o.stop(acx.currentTime + dur + 0.01);
+          } catch {
+            /* noop */
+          }
+        }
+
+        // UI controls
+        document.getElementById('mode1').onclick = () => {
+          mode = MODE.SOLO;
+          level = 1;
+          init();
+        };
+        document.getElementById('mode2').onclick = () => {
+          mode = MODE.VS;
+          init();
+        };
+        document.getElementById('restart').onclick = () => init();
+        document.getElementById('sound').onclick = () => {
+          soundOn = !soundOn;
+          document.getElementById('sound').textContent = 'Звук: ' + (soundOn ? 'вкл' : 'выкл');
+          try {
+            if (soundOn && !acx) acx = new (window.AudioContext || window.webkitAudioContext)();
+          } catch {
+            /* noop */
+          }
+        };
+        document.getElementById('level1').onclick = () => {
+          level = 1;
+          mode = MODE.SOLO;
+          init();
+        };
+        document.getElementById('level2').onclick = () => {
+          level = 2;
+          mode = MODE.SOLO;
+          init();
+        };
+        document.getElementById('level3').onclick = () => {
+          level = 3;
+          mode = MODE.SOLO;
+          init();
+        };
+        document.getElementById('level4').onclick = () => {
+          level = 4;
+          mode = MODE.SOLO;
+          init();
+        };
+        document.getElementById('level5').onclick = () => {
+          level = 5;
+          mode = MODE.SOLO;
+          init();
+        };
+
+        function updateHUD() {
+          const s = `Режим: ${mode === MODE.SOLO ? '1 игрок' : '2 игрока'}${mode === MODE.SOLO ? `, уровень ${level}` : ''}`;
+          document.getElementById('info').textContent = s;
+        }
+
+        init();
+        requestAnimationFrame(step);
+      })();
+    </script>
+  </body>
+</html>
