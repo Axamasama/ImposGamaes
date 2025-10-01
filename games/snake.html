@@ -2,7 +2,10 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"
+    />
     <title>Космическая змейка</title>
     <style>
       :root {
@@ -43,13 +46,14 @@
       }
       .panel {
         position: fixed;
-        left: 10px;
-        right: 10px;
-        bottom: 10px;
+        left: calc(10px + env(safe-area-inset-left));
+        right: calc(10px + env(safe-area-inset-right));
+        bottom: calc(10px + env(safe-area-inset-bottom));
         background: #0a0f1e;
         border: 1px solid #0f172a;
         border-radius: 12px;
-        padding: 8px 10px;
+        padding: 8px calc(10px + env(safe-area-inset-right)) 8px
+          calc(10px + env(safe-area-inset-left));
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
         display: flex;
         align-items: center;
@@ -64,7 +68,7 @@
       .mobile-ctrl {
         position: fixed;
         left: 50%;
-        bottom: 92px; /* above bottom panel */
+        bottom: calc(92px + env(safe-area-inset-bottom)); /* above bottom panel */
         transform: translateX(-50%);
         display: none;
         gap: 8px;
