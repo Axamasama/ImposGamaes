@@ -19,6 +19,7 @@
       body {
         height: 100%;
         margin: 0;
+        overflow: hidden;
         background: linear-gradient(180deg, #0b1020, #020617);
         color: #e5e7eb;
         font-family: Inter, system-ui, Arial;
@@ -27,39 +28,43 @@
         max-width: 1100px;
         margin: 0 auto;
         padding: 10px;
-        display: flex;
-        gap: 16px;
-        align-items: flex-start;
+        display: block;
+        height: 100dvh;
+        box-sizing: border-box;
+        overflow: hidden;
       }
       canvas {
         background: var(--grid);
         border-radius: 12px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
         width: 100%;
-        height: auto;
-        max-width: 720px;
+        height: calc(100dvh - 78px);
         touch-action: none;
       }
       .panel {
-        width: 320px;
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
         background: #0a0f1e;
         border: 1px solid #0f172a;
         border-radius: 12px;
-        padding: 14px;
+        padding: 8px 10px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
       @media (max-width: 768px) {
         .wrap {
-          flex-direction: column;
-        }
-        .panel {
-          width: 100%;
+          display: block;
         }
       }
       .mobile-ctrl {
         position: fixed;
         left: 50%;
-        bottom: 14px;
+        bottom: 92px; /* above bottom panel */
         transform: translateX(-50%);
         display: none;
         gap: 8px;
@@ -123,40 +128,25 @@
   </head>
   <body>
     <div class="wrap">
-      <canvas id="c" width="720" height="720"></canvas>
-      <aside class="panel">
-        <h1>Космическая змейка</h1>
-        <div class="row">
-          <button id="play">Играть/Пауза (Space)</button>
-          <button id="restart">Заново (R)</button>
+      <canvas
+        id="c"
+        width="720"
+        height="720"
+        style="width: 100%; height: calc(100dvh - 78px)"
+      ></canvas>
+      <div class="panel">
+        <div class="row" style="margin: 0">
+          <button id="play">Играть/Пауза</button>
+          <button id="restart">Заново</button>
         </div>
-        <div class="row lvl" id="levels"></div>
-        <div class="row">
-          <div>
-            <div class="label">Уровень</div>
-            <div class="stat" id="statLevel">1</div>
-          </div>
-          <div>
-            <div class="label">Скорость</div>
-            <div class="stat" id="statSpeed">1x</div>
-          </div>
-          <div>
-            <div class="label">Длина</div>
-            <div class="stat" id="statLen">0</div>
-          </div>
-        </div>
-        <div class="row">
+        <div class="row lvl" id="levels" style="margin: 0"></div>
+        <div class="row" style="margin: 0; gap: 12px">
+          <span class="label">Lvl:<span class="stat" id="statLevel">1</span></span>
+          <span class="label">Spd:<span class="stat" id="statSpeed">1x</span></span>
+          <span class="label">Len:<span class="stat" id="statLen">0</span></span>
           <button id="sound">Звук: выкл</button>
         </div>
-        <p class="note">
-          Правила: Начальная длина 8. Яблоко не удлиняет — наоборот, отпадает хвост и превращается в
-          препятствие, а скорость увеличивается в 1.4 раза. Когда длина станет 2 — появляется
-          портал, войдите в него, чтобы пройти уровень. Каждый следующий уровень — злее.
-        </p>
-        <p class="note">
-          Управление: Стрелки / WASD. Портал фиолетовый. Метеоры движутся. Удачи 🙂
-        </p>
-      </aside>
+      </div>
     </div>
     <div class="mobile-ctrl">
       <button id="btnLeft">◀︎</button>
