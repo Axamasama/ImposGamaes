@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <title>Сингулярность — круговой арканоид</title>
     <style>
       :root {
@@ -16,6 +16,7 @@
       body {
         height: 100%;
         margin: 0;
+        overflow: hidden;
         background: radial-gradient(60% 60% at 50% 40%, #0b1020, #020617);
         color: var(--text);
         font-family: Inter, system-ui, Arial;
@@ -24,32 +25,32 @@
         max-width: 1100px;
         margin: 0 auto;
         padding: 12px;
-        display: flex;
-        gap: 16px;
-        align-items: flex-start;
-        flex-wrap: wrap;
+        height: 100dvh;
+        box-sizing: border-box;
+        overflow: hidden;
       }
       canvas {
         background: transparent;
         border-radius: 16px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
         width: 100%;
-        height: auto;
-        max-width: 720px;
+        height: calc(100dvh - 78px);
         touch-action: none;
       }
       .panel {
-        width: 320px;
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
         background: #0a0f1e;
         border: 1px solid #0f172a;
         border-radius: 12px;
-        padding: 14px;
+        padding: 8px 10px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-      }
-      @media (max-width: 768px) {
-        .panel {
-          width: 100%;
-        }
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
       h1 {
         margin: 0 0 8px 0;
@@ -81,33 +82,24 @@
   </head>
   <body>
     <div class="wrap">
-      <canvas id="cv" width="720" height="720"></canvas>
-      <aside class="panel">
-        <h1>Сингулярность</h1>
-        <div class="row">
+      <canvas
+        id="cv"
+        width="720"
+        height="720"
+        style="width: 100%; height: calc(100dvh - 78px)"
+      ></canvas>
+      <div class="panel">
+        <div class="row" style="margin: 0">
           <button id="play">Играть/Пауза</button>
           <button id="restart">Заново</button>
           <button id="sound">Звук: выкл</button>
         </div>
-        <div class="row" style="gap: 12px">
-          <div>
-            <div class="label">Уровень</div>
-            <div class="stat" id="lv">1</div>
-          </div>
-          <div>
-            <div class="label">Очки</div>
-            <div class="stat" id="sc">0</div>
-          </div>
-          <div>
-            <div class="label">Шары</div>
-            <div class="stat" id="bs">0</div>
-          </div>
+        <div class="row" style="gap: 12px; margin: 0">
+          <span class="label">Lvl:<span class="stat" id="lv">1</span></span>
+          <span class="label">Score:<span class="stat" id="sc">0</span></span>
+          <span class="label">Balls:<span class="stat" id="bs">0</span></span>
         </div>
-        <p class="label">
-          Правила: Платформа движется по окружности, отражает шар. Ломайте неоновые блоки. Бонусы
-          притягиваются к стенке (гравитация от центра наружу). Проигрыш — когда шаров не осталось.
-        </p>
-      </aside>
+      </div>
     </div>
     <script>
       (function () {
@@ -141,6 +133,7 @@
             paddle: { ang: -Math.PI / 2, size: Math.PI * 0.18 * L.paddle },
             balls: [],
             bricks: [],
+            bumpers: [],
             bonuses: [],
             particles: [],
             slowTimer: 0,
@@ -165,6 +158,18 @@
               else if (roll > 0.85 && r <= L.rings - 2) type = 'explosive';
               const hp = type === 'hard' ? 2 : 1;
               s.bricks.push({ rad, r1: rad - ringW, a0, a1, hp, type });
+            }
+          }
+          // spawn bumpers (extra obstacles)
+          if (i >= 2) {
+            const count = Math.min(2 + i, 6);
+            for (let j = 0; j < count; j++) {
+              const rr = R * (0.25 + Math.random() * 0.35);
+              const aa = Math.random() * Math.PI * 2;
+              const x = C.x + Math.cos(aa) * rr;
+              const y = C.y + Math.sin(aa) * rr;
+              const rad = 10 + Math.random() * 12;
+              s.bumpers.push({ x, y, rad });
             }
           }
           // spawn one ball
@@ -225,9 +230,11 @@
         );
         function updateAngle(e) {
           const r = cv.getBoundingClientRect();
-          const x = e.clientX - r.left;
-          const y = e.clientY - r.top;
-          const a = Math.atan2(y - r.height / 2, x - r.width / 2);
+          const sx = cv.width / r.width;
+          const sy = cv.height / r.height;
+          const x = (e.clientX - r.left) * sx;
+          const y = (e.clientY - r.top) * sy;
+          const a = Math.atan2(y - cv.height / 2, x - cv.width / 2);
           state.paddle.ang = a;
         }
 
@@ -317,6 +324,12 @@
                 }
                 b.vx = nvx;
                 b.vy = nvy;
+                // failsafe minimal speed
+                const ls = Math.hypot(b.vx, b.vy) || 0;
+                if (ls < 0.5) {
+                  b.vx = n.x * tgt;
+                  b.vy = n.y * tgt;
+                }
                 // back off slightly
                 b.x = C.x + n.x * (R - 8);
                 b.y = C.y + n.y * (R - 8);
@@ -366,6 +379,28 @@
                 b.vy = v.y;
                 emitBrickParticles(b.x, b.y);
                 beep(440, 0.04);
+              }
+            }
+
+            // collide with bumpers (circular)
+            for (const ob of state.bumpers) {
+              const dx2 = b.x - ob.x,
+                dy2 = b.y - ob.y;
+              const dr = Math.hypot(dx2, dy2);
+              const rr = ob.rad + 5; // ball radius ~5
+              if (dr <= rr) {
+                const n = { x: dx2 / (dr || 1), y: dy2 / (dr || 1) };
+                const v = { x: b.vx, y: b.vy };
+                const dot = v.x * n.x + v.y * n.y;
+                v.x -= 2 * dot * n.x;
+                v.y -= 2 * dot * n.y;
+                const spd = Math.hypot(v.x, v.y) || levels[state.level].ballSpeed;
+                b.vx = (v.x / spd) * spd;
+                b.vy = (v.y / spd) * spd;
+                b.x = ob.x + n.x * (rr + 1);
+                b.y = ob.y + n.y * (rr + 1);
+                emitBrickParticles(b.x, b.y);
+                beep(500, 0.02);
               }
             }
 
@@ -653,6 +688,18 @@
                   : '#64ffda';
             const fill = br.type === 'hard' && br.hp > 1 ? '#111827' : '#0f172a';
             sector(br.r1, br.rad, br.a0, br.a1, fill, border);
+          }
+
+          // bumpers
+          for (const ob of state.bumpers) {
+            cx.save();
+            cx.fillStyle = '#334155';
+            cx.shadowColor = '#94a3b8';
+            cx.shadowBlur = 8;
+            cx.beginPath();
+            cx.arc(ob.x, ob.y, ob.rad, 0, Math.PI * 2);
+            cx.fill();
+            cx.restore();
           }
 
           // bonuses

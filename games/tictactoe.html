@@ -24,13 +24,16 @@
         font-family: Inter, system-ui, Arial;
       }
       .wrap {
-        max-width: 900px;
+        max-width: 1100px;
         margin: 0 auto;
-        padding: 16px;
+        padding: 12px;
+        padding-bottom: 96px; /* space for bottom bar */
         display: grid;
-        grid-template-columns: 1fr 320px;
-        gap: 16px;
+        grid-template-columns: 1fr 360px;
+        gap: 12px;
         align-items: start;
+        height: 100dvh;
+        box-sizing: border-box;
       }
       .board {
         background: var(--card);
@@ -96,11 +99,19 @@
         opacity: 0.6;
       }
       .panel {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
         background: var(--card);
         border: 1px solid #0f172a;
         border-radius: 12px;
-        padding: 14px;
+        padding: 8px 10px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
       .row {
         display: flex;
@@ -212,32 +223,29 @@
   <body>
     <div class="wrap">
       <section class="board">
-        <h2 style="margin-top: 0">ИИ-СН: неубиваемый противник</h2>
-        <div class="badge">Цель: ИИ никогда не проигрывает. Он может нарушать правила.</div>
-        <div id="status">Ваш ход (X)</div>
+        <div class="badge" id="status">Ваш ход (X)</div>
         <div class="grid" id="grid"></div>
       </section>
-      <aside class="panel">
-        <h3 style="margin-top: 0">Управление</h3>
-        <div class="row">
-          <button id="restart">Заново</button>
-          <button id="first">Играть первым</button>
-          <button id="second">Играть вторым</button>
-        </div>
-        <div class="row">
-          <div class="badge">Режим обмана: <span id="cheatPct">70%</span></div>
-        </div>
-        <div class="row">
-          <div class="badge">Тема чата:</div>
-          <button id="theme-neo">Неон</button>
-          <button id="theme-term">Терминал</button>
-          <button id="theme-warm">Тёплый</button>
-        </div>
-        <div class="row">
-          <button id="sound">Звук: выкл</button>
-        </div>
+      <section class="board">
+        <div class="badge">Чат</div>
         <div class="log" id="log"></div>
-      </aside>
+      </section>
+    </div>
+    <div class="panel">
+      <div class="row" style="margin: 0">
+        <button id="restart">Заново</button>
+        <button id="first">Играть первым</button>
+        <button id="second">Играть вторым</button>
+      </div>
+      <div class="row" style="margin: 0">
+        <span class="badge">Обман: <span id="cheatPct">70%</span></span>
+      </div>
+      <div class="row" style="margin: 0">
+        <button id="theme-neo">Неон</button>
+        <button id="theme-term">Терминал</button>
+        <button id="theme-warm">Тёплый</button>
+        <button id="sound">Звук: выкл</button>
+      </div>
     </div>
     <script>
       (function () {
